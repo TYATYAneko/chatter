@@ -5,13 +5,14 @@
 // ここにFirebaseの設定を入力してください
 // Firebase Console → プロジェクト設定 → マイアプリ → ウェブアプリ からコピー
 const firebaseConfig = {
-    apiKey: "YOUR_API_KEY",
-    authDomain: "YOUR_PROJECT.firebaseapp.com",
-    databaseURL: "https://YOUR_PROJECT-default-rtdb.firebaseio.com",
-    projectId: "YOUR_PROJECT",
-    storageBucket: "YOUR_PROJECT.appspot.com",
-    messagingSenderId: "YOUR_SENDER_ID",
-    appId: "YOUR_APP_ID"
+    apiKey: "AIzaSyDeYQlqUj1NeqWIXEKy6NPdsF0tfR_5ZFM",
+  authDomain: "chatter-c4b4f.firebaseapp.com",
+  databaseURL: "https://chatter-c4b4f-default-rtdb.asia-southeast1.firebasedatabase.app",
+  projectId: "chatter-c4b4f",
+  storageBucket: "chatter-c4b4f.firebasestorage.app",
+  messagingSenderId: "399040478258",
+  appId: "1:399040478258:web:14df3793a7312a9a1b102b",
+  measurementId: "G-HE720YW3DF"
 };
 
 // ========== 設定 ==========

@@ -116,6 +116,7 @@ Chatter/
 ├── index.html   # メインHTML
 ├── style.css    # スタイルシート
 ├── app.js       # JavaScript（Firebase対応）
+├── favicon.svg  # アイコン
 └── README.md    # このファイル
 ```
 

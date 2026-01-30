@@ -1,0 +1,20 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+  <!-- 背景 -->
+  <rect width="64" height="64" rx="12" fill="#111"/>
+
+  <!-- ノートのページ -->
+  <rect x="14" y="12" width="36" height="44" rx="4" fill="#fff"/>
+
+  <!-- 罫線 -->
+  <line x1="20" y1="24" x2="44" y2="24" stroke="#ddd" stroke-width="2"/>
+  <line x1="20" y1="32" x2="44" y2="32" stroke="#ddd" stroke-width="2"/>
+  <line x1="20" y1="40" x2="36" y2="40" stroke="#ddd" stroke-width="2"/>
+
+  <!-- 鉛筆 -->
+  <g transform="rotate(-45, 48, 48)">
+    <rect x="44" y="32" width="8" height="24" rx="1" fill="#FFB300"/>
+    <polygon points="44,56 48,64 52,56" fill="#FFB300"/>
+    <rect x="44" y="54" width="8" height="4" fill="#111"/>
+    <polygon points="46,58 48,64 50,58" fill="#F5F5F5"/>
+  </g>
+</svg>

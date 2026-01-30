@@ -649,7 +649,9 @@ h2 {
 
 .chat-input .btn {
     border-radius: 24px;
-    padding: 12px 24px;
+    padding: 10px 18px;
+    flex-shrink: 0;
+    font-size: 0.9rem;
 }
 
 /* テーマ */

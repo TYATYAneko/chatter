@@ -212,8 +212,8 @@ h2 {
 
 /* ロビー */
 .lobby-sections {
-    display: grid;
-    grid-template-columns: 1fr 1fr;
+    display: flex;
+    flex-direction: column;
     gap: 20px;
     margin-bottom: 30px;
 }
@@ -889,10 +889,6 @@ body.theme-dark .version {
 @media (max-width: 600px) {
     .container {
         padding: 25px;
-    }
-
-    .lobby-sections {
-        grid-template-columns: 1fr;
     }
 
     h1 {

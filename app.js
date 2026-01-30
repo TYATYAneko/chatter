@@ -19,18 +19,30 @@ let firebaseEnabled = false;
 
 function initFirebase() {
     try {
+        console.log('Firebase初期化開始...');
+        console.log('firebaseConfig存在:', typeof firebaseConfig !== 'undefined');
+
         if (typeof firebaseConfig === 'undefined') {
             console.log('Firebase設定ファイルが見つかりません - ローカルモードで動作します');
             return false;
         }
+
+        console.log('firebaseConfig.apiKey:', firebaseConfig.apiKey ? '設定済み' : '未設定');
+
         if (!firebaseConfig.apiKey || firebaseConfig.apiKey === "YOUR_API_KEY") {
             console.log('Firebase未設定 - ローカルモードで動作します');
             return false;
         }
+
+        if (typeof firebase === 'undefined') {
+            console.log('Firebase SDKが読み込まれていません - ローカルモードで動作します');
+            return false;
+        }
+
         firebase.initializeApp(firebaseConfig);
         db = firebase.database();
         auth = firebase.auth();
-        console.log('Firebase接続成功');
+        console.log('Firebase接続成功 - オンラインモードで動作します');
         return true;
     } catch (error) {
         console.error('Firebase初期化エラー:', error);

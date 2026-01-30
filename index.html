@@ -1,0 +1,222 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Chatter - チャットルーム</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <!-- サイトエントリーパスワード画面 -->
+    <div id="entry-screen" class="screen active">
+        <div class="container">
+            <h1>Chatter</h1>
+            <p class="subtitle">チャットルームへようこそ</p>
+            <div class="form-group">
+                <label for="entry-password">サイトパスワード（10桁の数字）</label>
+                <input type="password" id="entry-password" maxlength="10" pattern="[0-9]*" inputmode="numeric" placeholder="パスワードを入力">
+                <p id="entry-error" class="error"></p>
+            </div>
+            <button id="entry-btn" class="btn primary">入場</button>
+        </div>
+    </div>
+
+    <!-- ログイン/登録画面 -->
+    <div id="auth-screen" class="screen">
+        <div class="container">
+            <h1>Chatter</h1>
+            <div class="tabs">
+                <button class="tab active" data-tab="login">ログイン</button>
+                <button class="tab" data-tab="register">新規登録</button>
+            </div>
+
+            <!-- ログインフォーム -->
+            <div id="login-form" class="tab-content active">
+                <div class="form-group">
+                    <label for="login-name">ユーザー名</label>
+                    <input type="text" id="login-name" placeholder="ユーザー名">
+                </div>
+                <div class="form-group">
+                    <label for="login-password">パスワード</label>
+                    <input type="password" id="login-password" placeholder="パスワード">
+                </div>
+                <p id="login-error" class="error"></p>
+                <button id="login-btn" class="btn primary">ログイン</button>
+            </div>
+
+            <!-- 登録フォーム -->
+            <div id="register-form" class="tab-content">
+                <div class="form-group">
+                    <label for="register-name">ユーザー名</label>
+                    <input type="text" id="register-name" placeholder="ユーザー名（3文字以上）">
+                </div>
+                <div class="form-group">
+                    <label for="register-password">パスワード</label>
+                    <input type="password" id="register-password" placeholder="パスワード（4文字以上）">
+                </div>
+                <div class="form-group">
+                    <label for="register-password-confirm">パスワード確認</label>
+                    <input type="password" id="register-password-confirm" placeholder="パスワード再入力">
+                </div>
+                <p id="register-error" class="error"></p>
+                <button id="register-btn" class="btn primary">登録</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- ロビー画面 -->
+    <div id="lobby-screen" class="screen">
+        <div class="container">
+            <div class="header">
+                <h1>Chatter</h1>
+                <div class="user-info">
+                    <span id="current-user"></span>
+                    <button id="logout-btn" class="btn small">ログアウト</button>
+                </div>
+            </div>
+
+            <div class="lobby-sections">
+                <!-- ルーム作成 -->
+                <div class="section">
+                    <h2>ルームを作成</h2>
+                    <div class="form-group">
+                        <label for="room-name">ルーム名</label>
+                        <input type="text" id="room-name" placeholder="ルーム名を入力">
+                    </div>
+                    <div class="form-group">
+                        <label for="room-code-input">ルームコード（6桁の英数字）</label>
+                        <input type="text" id="room-code-input" maxlength="6" placeholder="例: ABC123">
+                        <p class="hint">空欄の場合は自動生成されます</p>
+                    </div>
+                    <p id="create-error" class="error"></p>
+                    <button id="create-room-btn" class="btn primary">作成</button>
+                    <div id="room-code-display" class="code-display hidden">
+                        <p>ルームコード:</p>
+                        <span id="generated-code" class="code"></span>
+                        <button id="copy-code-btn" class="btn small">コピー</button>
+                    </div>
+                </div>
+
+                <!-- ルーム入室 -->
+                <div class="section">
+                    <h2>ルームに入る</h2>
+                    <div class="form-group">
+                        <label for="join-code">ルームコード（6桁）</label>
+                        <input type="text" id="join-code" maxlength="6" placeholder="コードを入力">
+                    </div>
+                    <p id="join-error" class="error"></p>
+                    <button id="join-room-btn" class="btn primary">入室</button>
+                </div>
+            </div>
+
+            <!-- 参加中のルーム一覧 -->
+            <div class="section">
+                <h2>参加中のルーム</h2>
+                <div id="my-rooms" class="room-list"></div>
+            </div>
+        </div>
+    </div>
+
+    <!-- チャット画面 -->
+    <div id="chat-screen" class="screen">
+        <div class="chat-container">
+            <div class="chat-header">
+                <button id="back-to-lobby" class="btn small">戻る</button>
+                <div class="header-center">
+                    <h2 id="room-title"></h2>
+                    <span id="room-code-info" class="code small"></span>
+                </div>
+                <div class="menu-wrapper">
+                    <button id="menu-btn" class="btn small icon-btn">...</button>
+                    <div id="dropdown-menu" class="dropdown hidden">
+                        <button id="room-info-btn" class="dropdown-item">ルーム情報</button>
+                        <button id="settings-btn" class="dropdown-item">設定</button>
+                        <div class="dropdown-divider"></div>
+                        <button id="leave-room-btn" class="dropdown-item danger">ルームから退出</button>
+                    </div>
+                </div>
+            </div>
+            <div id="messages" class="messages"></div>
+            <div class="chat-input">
+                <input type="text" id="message-input" placeholder="メッセージを入力...">
+                <button id="send-btn" class="btn primary">送信</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- 設定モーダル -->
+    <div id="settings-modal" class="modal hidden">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h2>設定</h2>
+                <button id="close-settings" class="btn small">×</button>
+            </div>
+            <div class="modal-body">
+                <div class="setting-group">
+                    <label>テーマ</label>
+                    <div class="theme-options">
+                        <button class="theme-btn" data-theme="light">ライト</button>
+                        <button class="theme-btn" data-theme="dark">ダーク</button>
+                        <button class="theme-btn" data-theme="blue">ブルー</button>
+                        <button class="theme-btn" data-theme="green">グリーン</button>
+                    </div>
+                </div>
+                <div class="setting-group">
+                    <label>フォントサイズ</label>
+                    <div class="font-options">
+                        <button class="font-btn" data-size="small">小</button>
+                        <button class="font-btn" data-size="medium">中</button>
+                        <button class="font-btn" data-size="large">大</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- ルーム情報モーダル -->
+    <div id="room-info-modal" class="modal hidden">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h2>ルーム情報</h2>
+                <button id="close-room-info" class="btn small">×</button>
+            </div>
+            <div class="modal-body">
+                <div class="info-row">
+                    <span class="info-label">ルーム名</span>
+                    <span id="info-room-name" class="info-value"></span>
+                </div>
+                <div class="info-row">
+                    <span class="info-label">ルームコード</span>
+                    <span id="info-room-code" class="info-value code"></span>
+                </div>
+                <div class="info-row">
+                    <span class="info-label">作成者</span>
+                    <span id="info-room-creator" class="info-value"></span>
+                </div>
+                <div class="info-row">
+                    <span class="info-label">メンバー</span>
+                    <span id="info-room-members" class="info-value"></span>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- 確認モーダル -->
+    <div id="confirm-modal" class="modal hidden">
+        <div class="modal-content confirm-modal">
+            <div class="modal-body">
+                <p id="confirm-message">本当に退出しますか？</p>
+                <div class="confirm-buttons">
+                    <button id="confirm-cancel" class="btn small">キャンセル</button>
+                    <button id="confirm-ok" class="btn small danger-filled">退出する</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- バージョン表示 -->
+    <div class="version">v1.0.0</div>
+
+    <script src="app.js"></script>
+</body>
+</html>

@@ -1,48 +1,48 @@
-// Chatter - チャットアプリケーション
+// StudyBoard - グループ学習ノートアプリケーション
 
 // ========== 設定 ==========
-// サイトエントリーパスワード（10桁の数字）- ここを変更してください
+// アクセスコード（10桁の数字）- ここを変更してください
 const SITE_PASSWORD = '1234567890';
 
 // ========== データ管理 ==========
 const Storage = {
     getUsers() {
-        return JSON.parse(localStorage.getItem('chatter_users') || '{}');
+        return JSON.parse(localStorage.getItem('sb_users') || '{}');
     },
     saveUsers(users) {
-        localStorage.setItem('chatter_users', JSON.stringify(users));
+        localStorage.setItem('sb_users', JSON.stringify(users));
     },
-    getRooms() {
-        return JSON.parse(localStorage.getItem('chatter_rooms') || '{}');
+    getGroups() {
+        return JSON.parse(localStorage.getItem('sb_groups') || '{}');
     },
-    saveRooms(rooms) {
-        localStorage.setItem('chatter_rooms', JSON.stringify(rooms));
+    saveGroups(groups) {
+        localStorage.setItem('sb_groups', JSON.stringify(groups));
     },
     getCurrentUser() {
-        return JSON.parse(sessionStorage.getItem('chatter_currentUser') || 'null');
+        return JSON.parse(sessionStorage.getItem('sb_currentUser') || 'null');
     },
     setCurrentUser(user) {
-        sessionStorage.setItem('chatter_currentUser', JSON.stringify(user));
+        sessionStorage.setItem('sb_currentUser', JSON.stringify(user));
     },
     clearCurrentUser() {
-        sessionStorage.removeItem('chatter_currentUser');
+        sessionStorage.removeItem('sb_currentUser');
     },
     isEntryVerified() {
-        return sessionStorage.getItem('chatter_entry') === 'verified';
+        return sessionStorage.getItem('sb_entry') === 'verified';
     },
     setEntryVerified() {
-        sessionStorage.setItem('chatter_entry', 'verified');
+        sessionStorage.setItem('sb_entry', 'verified');
     },
     getSettings() {
-        return JSON.parse(localStorage.getItem('chatter_settings') || '{"theme":"light","fontSize":"medium"}');
+        return JSON.parse(localStorage.getItem('sb_settings') || '{"theme":"light","fontSize":"medium"}');
     },
     saveSettings(settings) {
-        localStorage.setItem('chatter_settings', JSON.stringify(settings));
+        localStorage.setItem('sb_settings', JSON.stringify(settings));
     }
 };
 
 // ========== ユーティリティ ==========
-function generateRoomCode() {
+function generateCode() {
     const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
     let code = '';
     for (let i = 0; i < 6; i++) {
@@ -62,10 +62,10 @@ function showScreen(screenId) {
 }
 
 // ========== 画面管理 ==========
-let currentRoom = null;
-let messagePollingInterval = null;
+let currentGroup = null;
+let pollingInterval = null;
 
-// エントリーパスワード画面
+// エントリー画面
 function initEntryScreen() {
     const entryBtn = document.getElementById('entry-btn');
     const entryPassword = document.getElementById('entry-password');
@@ -75,7 +75,7 @@ function initEntryScreen() {
         const password = entryPassword.value;
 
         if (password.length !== 10) {
-            entryError.textContent = 'パスワードは10桁の数字です';
+            entryError.textContent = 'コードは10桁の数字です';
             return;
         }
 
@@ -85,7 +85,7 @@ function initEntryScreen() {
         }
 
         if (password !== SITE_PASSWORD) {
-            entryError.textContent = 'パスワードが正しくありません';
+            entryError.textContent = 'コードが正しくありません';
             return;
         }
 
@@ -122,13 +122,13 @@ function initAuthScreen() {
         const password = loginPassword.value;
 
         if (!name || !password) {
-            loginError.textContent = 'ユーザー名とパスワードを入力してください';
+            loginError.textContent = 'ニックネームとパスワードを入力してください';
             return;
         }
 
         const users = Storage.getUsers();
         if (!users[name] || users[name].password !== password) {
-            loginError.textContent = 'ユーザー名またはパスワードが正しくありません';
+            loginError.textContent = 'ニックネームまたはパスワードが正しくありません';
             return;
         }
 
@@ -149,7 +149,7 @@ function initAuthScreen() {
         const confirm = registerPasswordConfirm.value;
 
         if (name.length < 3) {
-            registerError.textContent = 'ユーザー名は3文字以上で入力してください';
+            registerError.textContent = 'ニックネームは3文字以上で入力してください';
             return;
         }
 
@@ -165,11 +165,11 @@ function initAuthScreen() {
 
         const users = Storage.getUsers();
         if (users[name]) {
-            registerError.textContent = 'このユーザー名は既に使用されています';
+            registerError.textContent = 'このニックネームは既に使用されています';
             return;
         }
 
-        users[name] = { password, rooms: [] };
+        users[name] = { password, groups: [] };
         Storage.saveUsers(users);
         Storage.setCurrentUser({ name });
         showLobby();
@@ -192,10 +192,10 @@ function initAuthScreen() {
 // ロビー画面
 function initLobbyScreen() {
     const logoutBtn = document.getElementById('logout-btn');
-    const createRoomBtn = document.getElementById('create-room-btn');
-    const joinRoomBtn = document.getElementById('join-room-btn');
+    const createBtn = document.getElementById('create-room-btn');
+    const joinBtn = document.getElementById('join-room-btn');
     const copyCodeBtn = document.getElementById('copy-code-btn');
-    const roomName = document.getElementById('room-name');
+    const groupName = document.getElementById('room-name');
     const joinCode = document.getElementById('join-code');
 
     logoutBtn.addEventListener('click', () => {
@@ -203,21 +203,21 @@ function initLobbyScreen() {
         showScreen('auth-screen');
     });
 
-    createRoomBtn.addEventListener('click', () => {
-        const name = roomName.value.trim();
-        const roomCodeInput = document.getElementById('room-code-input');
+    createBtn.addEventListener('click', () => {
+        const name = groupName.value.trim();
+        const codeInput = document.getElementById('room-code-input');
         const createError = document.getElementById('create-error');
 
         if (!name) {
-            createError.textContent = 'ルーム名を入力してください';
+            createError.textContent = 'グループ名を入力してください';
             return;
         }
 
-        const rooms = Storage.getRooms();
+        const groups = Storage.getGroups();
         let code;
 
         // ユーザーがコードを入力した場合
-        const userCode = roomCodeInput.value.trim().toUpperCase();
+        const userCode = codeInput.value.trim().toUpperCase();
         if (userCode) {
             // 6桁の英数字かチェック
             if (!/^[A-Z0-9]{6}$/.test(userCode)) {
@@ -225,7 +225,7 @@ function initLobbyScreen() {
                 return;
             }
             // 既に使われているかチェック
-            if (rooms[userCode]) {
+            if (groups[userCode]) {
                 createError.textContent = 'このコードは既に使用されています';
                 return;
             }
@@ -233,31 +233,31 @@ function initLobbyScreen() {
         } else {
             // 自動生成
             do {
-                code = generateRoomCode();
-            } while (rooms[code]);
+                code = generateCode();
+            } while (groups[code]);
         }
 
         const currentUser = Storage.getCurrentUser();
-        rooms[code] = {
+        groups[code] = {
             name,
             code,
             creator: currentUser.name,
-            messages: [{
+            notes: [{
                 type: 'system',
-                text: `${currentUser.name}さんがルームを作成しました`,
+                text: `${currentUser.name}さんがグループを作成しました`,
                 timestamp: Date.now()
             }],
             members: [currentUser.name]
         };
-        Storage.saveRooms(rooms);
+        Storage.saveGroups(groups);
 
-        // ユーザーのルームリストに追加
+        // ユーザーのグループリストに追加
         const users = Storage.getUsers();
-        if (!users[currentUser.name].rooms) {
-            users[currentUser.name].rooms = [];
+        if (!users[currentUser.name].groups) {
+            users[currentUser.name].groups = [];
         }
-        if (!users[currentUser.name].rooms.includes(code)) {
-            users[currentUser.name].rooms.push(code);
+        if (!users[currentUser.name].groups.includes(code)) {
+            users[currentUser.name].groups.push(code);
         }
         Storage.saveUsers(users);
 
@@ -265,10 +265,10 @@ function initLobbyScreen() {
         document.getElementById('generated-code').textContent = code;
         document.getElementById('room-code-display').classList.remove('hidden');
         createError.textContent = '';
-        roomName.value = '';
-        roomCodeInput.value = '';
+        groupName.value = '';
+        codeInput.value = '';
 
-        updateMyRooms();
+        updateMyGroups();
     });
 
     copyCodeBtn.addEventListener('click', () => {
@@ -281,7 +281,7 @@ function initLobbyScreen() {
         });
     });
 
-    joinRoomBtn.addEventListener('click', () => {
+    joinBtn.addEventListener('click', () => {
         const code = joinCode.value.trim().toUpperCase();
         const joinError = document.getElementById('join-error');
 
@@ -290,42 +290,42 @@ function initLobbyScreen() {
             return;
         }
 
-        const rooms = Storage.getRooms();
-        if (!rooms[code]) {
-            joinError.textContent = 'ルームが見つかりません';
+        const groups = Storage.getGroups();
+        if (!groups[code]) {
+            joinError.textContent = 'グループが見つかりません';
             return;
         }
 
         const currentUser = Storage.getCurrentUser();
 
         // メンバーに追加
-        if (!rooms[code].members.includes(currentUser.name)) {
-            rooms[code].members.push(currentUser.name);
-            rooms[code].messages.push({
+        if (!groups[code].members.includes(currentUser.name)) {
+            groups[code].members.push(currentUser.name);
+            groups[code].notes.push({
                 type: 'system',
-                text: `${currentUser.name}さんが入室しました`,
+                text: `${currentUser.name}さんが参加しました`,
                 timestamp: Date.now()
             });
-            Storage.saveRooms(rooms);
+            Storage.saveGroups(groups);
         }
 
-        // ユーザーのルームリストに追加
+        // ユーザーのグループリストに追加
         const users = Storage.getUsers();
-        if (!users[currentUser.name].rooms) {
-            users[currentUser.name].rooms = [];
+        if (!users[currentUser.name].groups) {
+            users[currentUser.name].groups = [];
         }
-        if (!users[currentUser.name].rooms.includes(code)) {
-            users[currentUser.name].rooms.push(code);
+        if (!users[currentUser.name].groups.includes(code)) {
+            users[currentUser.name].groups.push(code);
         }
         Storage.saveUsers(users);
 
         joinCode.value = '';
         joinError.textContent = '';
-        enterRoom(code);
+        enterGroup(code);
     });
 
     joinCode.addEventListener('keypress', (e) => {
-        if (e.key === 'Enter') joinRoomBtn.click();
+        if (e.key === 'Enter') joinBtn.click();
     });
 }
 
@@ -333,56 +333,56 @@ function showLobby() {
     const currentUser = Storage.getCurrentUser();
     document.getElementById('current-user').textContent = currentUser.name;
     document.getElementById('room-code-display').classList.add('hidden');
-    updateMyRooms();
+    updateMyGroups();
     showScreen('lobby-screen');
 }
 
-function updateMyRooms() {
-    const myRoomsContainer = document.getElementById('my-rooms');
+function updateMyGroups() {
+    const container = document.getElementById('my-rooms');
     const currentUser = Storage.getCurrentUser();
     const users = Storage.getUsers();
-    const rooms = Storage.getRooms();
+    const groups = Storage.getGroups();
 
-    const userRooms = users[currentUser.name]?.rooms || [];
+    const userGroups = users[currentUser.name]?.groups || [];
 
-    if (userRooms.length === 0) {
-        myRoomsContainer.innerHTML = '<p style="color: #888; text-align: center;">参加中のルームはありません</p>';
+    if (userGroups.length === 0) {
+        container.innerHTML = '<p style="color: #888; text-align: center;">参加中のグループはありません</p>';
         return;
     }
 
-    myRoomsContainer.innerHTML = userRooms
-        .filter(code => rooms[code])
+    container.innerHTML = userGroups
+        .filter(code => groups[code])
         .map(code => {
-            const room = rooms[code];
+            const group = groups[code];
             return `
                 <div class="room-item">
                     <div class="room-info">
-                        <span class="room-name">${room.name}</span>
-                        <span class="room-code">${room.code}</span>
+                        <span class="room-name">${group.name}</span>
+                        <span class="room-code">${group.code}</span>
                     </div>
-                    <button class="btn small" onclick="enterRoom('${room.code}')">入る</button>
+                    <button class="btn small" onclick="enterGroup('${group.code}')">開く</button>
                 </div>
             `;
         }).join('');
 }
 
-// チャット画面
+// ノート画面
 function initChatScreen() {
     const backBtn = document.getElementById('back-to-lobby');
     const sendBtn = document.getElementById('send-btn');
-    const messageInput = document.getElementById('message-input');
+    const noteInput = document.getElementById('message-input');
     const menuBtn = document.getElementById('menu-btn');
     const dropdownMenu = document.getElementById('dropdown-menu');
-    const leaveRoomBtn = document.getElementById('leave-room-btn');
+    const leaveBtn = document.getElementById('leave-room-btn');
     const settingsBtn = document.getElementById('settings-btn');
-    const roomInfoBtn = document.getElementById('room-info-btn');
+    const infoBtn = document.getElementById('room-info-btn');
 
     backBtn.addEventListener('click', () => {
-        if (messagePollingInterval) {
-            clearInterval(messagePollingInterval);
-            messagePollingInterval = null;
+        if (pollingInterval) {
+            clearInterval(pollingInterval);
+            pollingInterval = null;
         }
-        currentRoom = null;
+        currentGroup = null;
         showLobby();
     });
 
@@ -401,10 +401,10 @@ function initChatScreen() {
         e.stopPropagation();
     });
 
-    // ルーム情報
-    roomInfoBtn.addEventListener('click', () => {
+    // グループ情報
+    infoBtn.addEventListener('click', () => {
         dropdownMenu.classList.add('hidden');
-        showRoomInfo();
+        showGroupInfo();
     });
 
     // 設定
@@ -414,54 +414,54 @@ function initChatScreen() {
     });
 
     // 退出
-    leaveRoomBtn.addEventListener('click', () => {
+    leaveBtn.addEventListener('click', () => {
         dropdownMenu.classList.add('hidden');
-        leaveRoom();
+        leaveGroup();
     });
 
-    sendBtn.addEventListener('click', sendMessage);
-    messageInput.addEventListener('keypress', (e) => {
-        if (e.key === 'Enter') sendMessage();
+    sendBtn.addEventListener('click', sendNote);
+    noteInput.addEventListener('keypress', (e) => {
+        if (e.key === 'Enter') sendNote();
     });
 }
 
-function leaveRoom() {
-    if (!currentRoom) return;
-    showConfirm('このルームから退出しますか？', doLeaveRoom);
+function leaveGroup() {
+    if (!currentGroup) return;
+    showConfirm('このグループから退出しますか？', doLeaveGroup);
 }
 
-function doLeaveRoom() {
+function doLeaveGroup() {
     const currentUser = Storage.getCurrentUser();
-    const rooms = Storage.getRooms();
+    const groups = Storage.getGroups();
     const users = Storage.getUsers();
 
-    // ルームのメンバーリストから削除
-    if (rooms[currentRoom]) {
-        rooms[currentRoom].members = rooms[currentRoom].members.filter(
+    // グループのメンバーリストから削除
+    if (groups[currentGroup]) {
+        groups[currentGroup].members = groups[currentGroup].members.filter(
             name => name !== currentUser.name
         );
-        rooms[currentRoom].messages.push({
+        groups[currentGroup].notes.push({
             type: 'system',
             text: `${currentUser.name}さんが退出しました`,
             timestamp: Date.now()
         });
-        Storage.saveRooms(rooms);
+        Storage.saveGroups(groups);
     }
 
-    // ユーザーのルームリストから削除
-    if (users[currentUser.name]?.rooms) {
-        users[currentUser.name].rooms = users[currentUser.name].rooms.filter(
-            code => code !== currentRoom
+    // ユーザーのグループリストから削除
+    if (users[currentUser.name]?.groups) {
+        users[currentUser.name].groups = users[currentUser.name].groups.filter(
+            code => code !== currentGroup
         );
         Storage.saveUsers(users);
     }
 
     // ポーリング停止してロビーへ
-    if (messagePollingInterval) {
-        clearInterval(messagePollingInterval);
-        messagePollingInterval = null;
+    if (pollingInterval) {
+        clearInterval(pollingInterval);
+        pollingInterval = null;
     }
-    currentRoom = null;
+    currentGroup = null;
     showLobby();
 }
 
@@ -500,15 +500,15 @@ function initConfirmModal() {
     });
 }
 
-function showRoomInfo() {
-    const rooms = Storage.getRooms();
-    const room = rooms[currentRoom];
-    if (!room) return;
+function showGroupInfo() {
+    const groups = Storage.getGroups();
+    const group = groups[currentGroup];
+    if (!group) return;
 
-    document.getElementById('info-room-name').textContent = room.name;
-    document.getElementById('info-room-code').textContent = room.code;
-    document.getElementById('info-room-creator').textContent = room.creator;
-    document.getElementById('info-room-members').textContent = room.members.join(', ');
+    document.getElementById('info-room-name').textContent = group.name;
+    document.getElementById('info-room-code').textContent = group.code;
+    document.getElementById('info-room-creator').textContent = group.creator;
+    document.getElementById('info-room-members').textContent = group.members.join(', ');
 
     document.getElementById('room-info-modal').classList.remove('hidden');
 }
@@ -529,17 +529,17 @@ function showSettings() {
 
 function initSettings() {
     const settingsModal = document.getElementById('settings-modal');
-    const roomInfoModal = document.getElementById('room-info-modal');
+    const infoModal = document.getElementById('room-info-modal');
     const closeSettings = document.getElementById('close-settings');
-    const closeRoomInfo = document.getElementById('close-room-info');
+    const closeInfo = document.getElementById('close-room-info');
 
     // モーダルを閉じる
     closeSettings.addEventListener('click', () => {
         settingsModal.classList.add('hidden');
     });
 
-    closeRoomInfo.addEventListener('click', () => {
-        roomInfoModal.classList.add('hidden');
+    closeInfo.addEventListener('click', () => {
+        infoModal.classList.add('hidden');
     });
 
     // モーダル背景クリックで閉じる
@@ -549,9 +549,9 @@ function initSettings() {
         }
     });
 
-    roomInfoModal.addEventListener('click', (e) => {
-        if (e.target === roomInfoModal) {
-            roomInfoModal.classList.add('hidden');
+    infoModal.addEventListener('click', (e) => {
+        if (e.target === infoModal) {
+            infoModal.classList.add('hidden');
         }
     });
 
@@ -601,68 +601,68 @@ function applySettings() {
     document.body.classList.add(`font-${settings.fontSize}`);
 }
 
-function enterRoom(code) {
-    const rooms = Storage.getRooms();
-    const room = rooms[code];
+function enterGroup(code) {
+    const groups = Storage.getGroups();
+    const group = groups[code];
 
-    if (!room) return;
+    if (!group) return;
 
-    currentRoom = code;
-    document.getElementById('room-title').textContent = room.name;
-    document.getElementById('room-code-info').textContent = room.code;
+    currentGroup = code;
+    document.getElementById('room-title').textContent = group.name;
+    document.getElementById('room-code-info').textContent = group.code;
 
     showScreen('chat-screen');
-    renderMessages();
+    renderNotes();
 
-    // メッセージのポーリング開始
-    if (messagePollingInterval) {
-        clearInterval(messagePollingInterval);
+    // ノートのポーリング開始
+    if (pollingInterval) {
+        clearInterval(pollingInterval);
     }
-    messagePollingInterval = setInterval(renderMessages, 1000);
+    pollingInterval = setInterval(renderNotes, 1000);
 }
 
-function sendMessage() {
+function sendNote() {
     const input = document.getElementById('message-input');
     const text = input.value.trim();
 
-    if (!text || !currentRoom) return;
+    if (!text || !currentGroup) return;
 
     const currentUser = Storage.getCurrentUser();
-    const rooms = Storage.getRooms();
+    const groups = Storage.getGroups();
 
-    if (!rooms[currentRoom]) return;
+    if (!groups[currentGroup]) return;
 
-    rooms[currentRoom].messages.push({
+    groups[currentGroup].notes.push({
         type: 'user',
         sender: currentUser.name,
         text,
         timestamp: Date.now()
     });
 
-    Storage.saveRooms(rooms);
+    Storage.saveGroups(groups);
     input.value = '';
-    renderMessages();
+    renderNotes();
 }
 
-function renderMessages() {
+function renderNotes() {
     const container = document.getElementById('messages');
-    const rooms = Storage.getRooms();
-    const room = rooms[currentRoom];
+    const groups = Storage.getGroups();
+    const group = groups[currentGroup];
     const currentUser = Storage.getCurrentUser();
 
-    if (!room) return;
+    if (!group) return;
 
-    container.innerHTML = room.messages.map(msg => {
-        if (msg.type === 'system') {
-            return `<div class="message system">${msg.text}</div>`;
+    container.innerHTML = group.notes.map(note => {
+        if (note.type === 'system') {
+            return `<div class="message system">${note.text}</div>`;
         }
 
-        const isOwn = msg.sender === currentUser.name;
+        const isOwn = note.sender === currentUser.name;
         return `
             <div class="message ${isOwn ? 'own' : 'other'}">
-                ${!isOwn ? `<div class="sender">${msg.sender}</div>` : ''}
-                <div class="text">${escapeHtml(msg.text)}</div>
-                <div class="time">${formatTime(msg.timestamp)}</div>
+                ${!isOwn ? `<div class="sender">${note.sender}</div>` : ''}
+                <div class="text">${escapeHtml(note.text)}</div>
+                <div class="time">${formatTime(note.timestamp)}</div>
             </div>
         `;
     }).join('');
@@ -693,8 +693,8 @@ function checkAuthAndNavigate() {
 
 // storageイベントでリアルタイム同期
 window.addEventListener('storage', (e) => {
-    if (e.key === 'chatter_rooms' && currentRoom) {
-        renderMessages();
+    if (e.key === 'sb_groups' && currentGroup) {
+        renderNotes();
     }
 });
 
@@ -709,5 +709,5 @@ document.addEventListener('DOMContentLoaded', () => {
     checkAuthAndNavigate();
 });
 
-// グローバル関数として公開（HTMLから呼び出し用）
-window.enterRoom = enterRoom;
+// グローバル関数として公開
+window.enterGroup = enterGroup;

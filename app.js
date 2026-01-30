@@ -1,5 +1,5 @@
 // StudyBoard - グループ学習ノートアプリケーション
-// Firebase Authentication対応版 v2.1.1
+// Firebase Authentication対応版 v2.1.2
 
 // ========== Firebase設定 ==========
 // firebase-config.js から読み込まれます

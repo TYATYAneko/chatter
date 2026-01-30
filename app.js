@@ -1,23 +1,54 @@
 // StudyBoard - グループ学習ノートアプリケーション
+// Firebase対応版 v2.0.0
+
+// ========== Firebase設定 ==========
+// ここにFirebaseの設定を入力してください
+// Firebase Console → プロジェクト設定 → マイアプリ → ウェブアプリ からコピー
+const firebaseConfig = {
+    apiKey: "YOUR_API_KEY",
+    authDomain: "YOUR_PROJECT.firebaseapp.com",
+    databaseURL: "https://YOUR_PROJECT-default-rtdb.firebaseio.com",
+    projectId: "YOUR_PROJECT",
+    storageBucket: "YOUR_PROJECT.appspot.com",
+    messagingSenderId: "YOUR_SENDER_ID",
+    appId: "YOUR_APP_ID"
+};
 
 // ========== 設定 ==========
 // アクセスコード（10桁の数字）- ここを変更してください
 const SITE_PASSWORD = '1234567890';
 
+// ========== Firebase初期化 ==========
+let db = null;
+let firebaseEnabled = false;
+
+function initFirebase() {
+    try {
+        if (firebaseConfig.apiKey === "YOUR_API_KEY") {
+            console.log('Firebase未設定 - ローカルモードで動作します');
+            return false;
+        }
+        firebase.initializeApp(firebaseConfig);
+        db = firebase.database();
+        console.log('Firebase接続成功');
+        return true;
+    } catch (error) {
+        console.error('Firebase初期化エラー:', error);
+        return false;
+    }
+}
+
 // ========== データ管理 ==========
 const Storage = {
-    getUsers() {
-        return JSON.parse(localStorage.getItem('sb_users') || '{}');
+    // ローカル設定（テーマ・フォントサイズ）
+    getSettings() {
+        return JSON.parse(localStorage.getItem('sb_settings') || '{"theme":"light","fontSize":"medium"}');
     },
-    saveUsers(users) {
-        localStorage.setItem('sb_users', JSON.stringify(users));
+    saveSettings(settings) {
+        localStorage.setItem('sb_settings', JSON.stringify(settings));
     },
-    getGroups() {
-        return JSON.parse(localStorage.getItem('sb_groups') || '{}');
-    },
-    saveGroups(groups) {
-        localStorage.setItem('sb_groups', JSON.stringify(groups));
-    },
+
+    // セッション管理
     getCurrentUser() {
         return JSON.parse(sessionStorage.getItem('sb_currentUser') || 'null');
     },
@@ -33,11 +64,69 @@ const Storage = {
     setEntryVerified() {
         sessionStorage.setItem('sb_entry', 'verified');
     },
-    getSettings() {
-        return JSON.parse(localStorage.getItem('sb_settings') || '{"theme":"light","fontSize":"medium"}');
+
+    // Firebase操作 - ユーザー
+    async getUsers() {
+        if (!firebaseEnabled) {
+            return JSON.parse(localStorage.getItem('sb_users') || '{}');
+        }
+        const snapshot = await db.ref('users').once('value');
+        return snapshot.val() || {};
     },
-    saveSettings(settings) {
-        localStorage.setItem('sb_settings', JSON.stringify(settings));
+    async saveUser(name, userData) {
+        if (!firebaseEnabled) {
+            const users = JSON.parse(localStorage.getItem('sb_users') || '{}');
+            users[name] = userData;
+            localStorage.setItem('sb_users', JSON.stringify(users));
+            return;
+        }
+        await db.ref('users/' + name).set(userData);
+    },
+    async getUser(name) {
+        if (!firebaseEnabled) {
+            const users = JSON.parse(localStorage.getItem('sb_users') || '{}');
+            return users[name] || null;
+        }
+        const snapshot = await db.ref('users/' + name).once('value');
+        return snapshot.val();
+    },
+
+    // Firebase操作 - グループ
+    async getGroups() {
+        if (!firebaseEnabled) {
+            return JSON.parse(localStorage.getItem('sb_groups') || '{}');
+        }
+        const snapshot = await db.ref('groups').once('value');
+        return snapshot.val() || {};
+    },
+    async saveGroup(code, groupData) {
+        if (!firebaseEnabled) {
+            const groups = JSON.parse(localStorage.getItem('sb_groups') || '{}');
+            groups[code] = groupData;
+            localStorage.setItem('sb_groups', JSON.stringify(groups));
+            return;
+        }
+        await db.ref('groups/' + code).set(groupData);
+    },
+    async getGroup(code) {
+        if (!firebaseEnabled) {
+            const groups = JSON.parse(localStorage.getItem('sb_groups') || '{}');
+            return groups[code] || null;
+        }
+        const snapshot = await db.ref('groups/' + code).once('value');
+        return snapshot.val();
+    },
+    async addNote(code, note) {
+        if (!firebaseEnabled) {
+            const groups = JSON.parse(localStorage.getItem('sb_groups') || '{}');
+            if (groups[code]) {
+                groups[code].notes.push(note);
+                localStorage.setItem('sb_groups', JSON.stringify(groups));
+            }
+            return;
+        }
+        const notesRef = db.ref('groups/' + code + '/notes');
+        await notesRef.push(note);
     }
 };
 
@@ -61,9 +150,16 @@ function showScreen(screenId) {
     document.getElementById(screenId).classList.add('active');
 }
 
+function showLoading(show) {
+    // ボタンの無効化などでローディング状態を表現
+    document.querySelectorAll('.btn.primary').forEach(btn => {
+        btn.disabled = show;
+    });
+}
+
 // ========== 画面管理 ==========
 let currentGroup = null;
-let pollingInterval = null;
+let groupListener = null;
 
 // エントリー画面
 function initEntryScreen() {
@@ -117,7 +213,7 @@ function initAuthScreen() {
     const loginPassword = document.getElementById('login-password');
     const loginError = document.getElementById('login-error');
 
-    loginBtn.addEventListener('click', () => {
+    loginBtn.addEventListener('click', async () => {
         const name = loginName.value.trim();
         const password = loginPassword.value;
 
@@ -126,14 +222,22 @@ function initAuthScreen() {
             return;
         }
 
-        const users = Storage.getUsers();
-        if (!users[name] || users[name].password !== password) {
-            loginError.textContent = 'ニックネームまたはパスワードが正しくありません';
-            return;
-        }
+        showLoading(true);
+        try {
+            const user = await Storage.getUser(name);
+            if (!user || user.password !== password) {
+                loginError.textContent = 'ニックネームまたはパスワードが正しくありません';
+                showLoading(false);
+                return;
+            }
 
-        Storage.setCurrentUser({ name });
-        showLobby();
+            Storage.setCurrentUser({ name });
+            showLobby();
+        } catch (error) {
+            loginError.textContent = '接続エラーが発生しました';
+            console.error(error);
+        }
+        showLoading(false);
     });
 
     // 登録
@@ -143,7 +247,7 @@ function initAuthScreen() {
     const registerPasswordConfirm = document.getElementById('register-password-confirm');
     const registerError = document.getElementById('register-error');
 
-    registerBtn.addEventListener('click', () => {
+    registerBtn.addEventListener('click', async () => {
         const name = registerName.value.trim();
         const password = registerPassword.value;
         const confirm = registerPasswordConfirm.value;
@@ -163,16 +267,23 @@ function initAuthScreen() {
             return;
         }
 
-        const users = Storage.getUsers();
-        if (users[name]) {
-            registerError.textContent = 'このニックネームは既に使用されています';
-            return;
-        }
+        showLoading(true);
+        try {
+            const existingUser = await Storage.getUser(name);
+            if (existingUser) {
+                registerError.textContent = 'このニックネームは既に使用されています';
+                showLoading(false);
+                return;
+            }
 
-        users[name] = { password, groups: [] };
-        Storage.saveUsers(users);
-        Storage.setCurrentUser({ name });
-        showLobby();
+            await Storage.saveUser(name, { password, groups: [] });
+            Storage.setCurrentUser({ name });
+            showLobby();
+        } catch (error) {
+            registerError.textContent = '接続エラーが発生しました';
+            console.error(error);
+        }
+        showLoading(false);
     });
 
     // Enterキーでの送信
@@ -203,7 +314,7 @@ function initLobbyScreen() {
         showScreen('auth-screen');
     });
 
-    createBtn.addEventListener('click', () => {
+    createBtn.addEventListener('click', async () => {
         const name = groupName.value.trim();
         const codeInput = document.getElementById('room-code-input');
         const createError = document.getElementById('create-error');
@@ -213,62 +324,66 @@ function initLobbyScreen() {
             return;
         }
 
-        const groups = Storage.getGroups();
-        let code;
+        showLoading(true);
+        try {
+            const groups = await Storage.getGroups();
+            let code;
 
-        // ユーザーがコードを入力した場合
-        const userCode = codeInput.value.trim().toUpperCase();
-        if (userCode) {
-            // 6桁の英数字かチェック
-            if (!/^[A-Z0-9]{6}$/.test(userCode)) {
-                createError.textContent = 'コードは6桁の英数字で入力してください';
-                return;
+            // ユーザーがコードを入力した場合
+            const userCode = codeInput.value.trim().toUpperCase();
+            if (userCode) {
+                if (!/^[A-Z0-9]{6}$/.test(userCode)) {
+                    createError.textContent = 'コードは6桁の英数字で入力してください';
+                    showLoading(false);
+                    return;
+                }
+                if (groups[userCode]) {
+                    createError.textContent = 'このコードは既に使用されています';
+                    showLoading(false);
+                    return;
+                }
+                code = userCode;
+            } else {
+                do {
+                    code = generateCode();
+                } while (groups[code]);
             }
-            // 既に使われているかチェック
-            if (groups[userCode]) {
-                createError.textContent = 'このコードは既に使用されています';
-                return;
+
+            const currentUser = Storage.getCurrentUser();
+            const newGroup = {
+                name,
+                code,
+                creator: currentUser.name,
+                notes: [{
+                    type: 'system',
+                    text: `${currentUser.name}さんがグループを作成しました`,
+                    timestamp: Date.now()
+                }],
+                members: [currentUser.name]
+            };
+            await Storage.saveGroup(code, newGroup);
+
+            // ユーザーのグループリストに追加
+            const user = await Storage.getUser(currentUser.name);
+            if (!user.groups) user.groups = [];
+            if (!user.groups.includes(code)) {
+                user.groups.push(code);
             }
-            code = userCode;
-        } else {
-            // 自動生成
-            do {
-                code = generateCode();
-            } while (groups[code]);
+            await Storage.saveUser(currentUser.name, user);
+
+            // コード表示
+            document.getElementById('generated-code').textContent = code;
+            document.getElementById('room-code-display').classList.remove('hidden');
+            createError.textContent = '';
+            groupName.value = '';
+            codeInput.value = '';
+
+            await updateMyGroups();
+        } catch (error) {
+            createError.textContent = '接続エラーが発生しました';
+            console.error(error);
         }
-
-        const currentUser = Storage.getCurrentUser();
-        groups[code] = {
-            name,
-            code,
-            creator: currentUser.name,
-            notes: [{
-                type: 'system',
-                text: `${currentUser.name}さんがグループを作成しました`,
-                timestamp: Date.now()
-            }],
-            members: [currentUser.name]
-        };
-        Storage.saveGroups(groups);
-
-        // ユーザーのグループリストに追加
-        const users = Storage.getUsers();
-        if (!users[currentUser.name].groups) {
-            users[currentUser.name].groups = [];
-        }
-        if (!users[currentUser.name].groups.includes(code)) {
-            users[currentUser.name].groups.push(code);
-        }
-        Storage.saveUsers(users);
-
-        // コード表示
-        document.getElementById('generated-code').textContent = code;
-        document.getElementById('room-code-display').classList.remove('hidden');
-        createError.textContent = '';
-        groupName.value = '';
-        codeInput.value = '';
-
-        updateMyGroups();
+        showLoading(false);
     });
 
     copyCodeBtn.addEventListener('click', () => {
@@ -281,7 +396,7 @@ function initLobbyScreen() {
         });
     });
 
-    joinBtn.addEventListener('click', () => {
+    joinBtn.addEventListener('click', async () => {
         const code = joinCode.value.trim().toUpperCase();
         const joinError = document.getElementById('join-error');
 
@@ -290,38 +405,44 @@ function initLobbyScreen() {
             return;
         }
 
-        const groups = Storage.getGroups();
-        if (!groups[code]) {
-            joinError.textContent = 'グループが見つかりません';
-            return;
-        }
+        showLoading(true);
+        try {
+            const group = await Storage.getGroup(code);
+            if (!group) {
+                joinError.textContent = 'グループが見つかりません';
+                showLoading(false);
+                return;
+            }
 
-        const currentUser = Storage.getCurrentUser();
+            const currentUser = Storage.getCurrentUser();
 
-        // メンバーに追加
-        if (!groups[code].members.includes(currentUser.name)) {
-            groups[code].members.push(currentUser.name);
-            groups[code].notes.push({
-                type: 'system',
-                text: `${currentUser.name}さんが参加しました`,
-                timestamp: Date.now()
-            });
-            Storage.saveGroups(groups);
-        }
+            // メンバーに追加
+            if (!group.members.includes(currentUser.name)) {
+                group.members.push(currentUser.name);
+                await Storage.addNote(code, {
+                    type: 'system',
+                    text: `${currentUser.name}さんが参加しました`,
+                    timestamp: Date.now()
+                });
+                await Storage.saveGroup(code, group);
+            }
 
-        // ユーザーのグループリストに追加
-        const users = Storage.getUsers();
-        if (!users[currentUser.name].groups) {
-            users[currentUser.name].groups = [];
-        }
-        if (!users[currentUser.name].groups.includes(code)) {
-            users[currentUser.name].groups.push(code);
-        }
-        Storage.saveUsers(users);
+            // ユーザーのグループリストに追加
+            const user = await Storage.getUser(currentUser.name);
+            if (!user.groups) user.groups = [];
+            if (!user.groups.includes(code)) {
+                user.groups.push(code);
+            }
+            await Storage.saveUser(currentUser.name, user);
 
-        joinCode.value = '';
-        joinError.textContent = '';
-        enterGroup(code);
+            joinCode.value = '';
+            joinError.textContent = '';
+            enterGroup(code);
+        } catch (error) {
+            joinError.textContent = '接続エラーが発生しました';
+            console.error(error);
+        }
+        showLoading(false);
     });
 
     joinCode.addEventListener('keypress', (e) => {
@@ -329,41 +450,47 @@ function initLobbyScreen() {
     });
 }
 
-function showLobby() {
+async function showLobby() {
     const currentUser = Storage.getCurrentUser();
     document.getElementById('current-user').textContent = currentUser.name;
     document.getElementById('room-code-display').classList.add('hidden');
-    updateMyGroups();
+    await updateMyGroups();
     showScreen('lobby-screen');
 }
 
-function updateMyGroups() {
+async function updateMyGroups() {
     const container = document.getElementById('my-rooms');
     const currentUser = Storage.getCurrentUser();
-    const users = Storage.getUsers();
-    const groups = Storage.getGroups();
 
-    const userGroups = users[currentUser.name]?.groups || [];
+    try {
+        const user = await Storage.getUser(currentUser.name);
+        const groups = await Storage.getGroups();
 
-    if (userGroups.length === 0) {
-        container.innerHTML = '<p style="color: #888; text-align: center;">参加中のグループはありません</p>';
-        return;
-    }
+        const userGroups = user?.groups || [];
 
-    container.innerHTML = userGroups
-        .filter(code => groups[code])
-        .map(code => {
-            const group = groups[code];
-            return `
-                <div class="room-item">
-                    <div class="room-info">
-                        <span class="room-name">${group.name}</span>
-                        <span class="room-code">${group.code}</span>
+        if (userGroups.length === 0) {
+            container.innerHTML = '<p style="color: #888; text-align: center;">参加中のグループはありません</p>';
+            return;
+        }
+
+        container.innerHTML = userGroups
+            .filter(code => groups[code])
+            .map(code => {
+                const group = groups[code];
+                return `
+                    <div class="room-item">
+                        <div class="room-info">
+                            <span class="room-name">${group.name}</span>
+                            <span class="room-code">${group.code}</span>
+                        </div>
+                        <button class="btn small" onclick="enterGroup('${group.code}')">開く</button>
                     </div>
-                    <button class="btn small" onclick="enterGroup('${group.code}')">開く</button>
-                </div>
-            `;
-        }).join('');
+                `;
+            }).join('');
+    } catch (error) {
+        container.innerHTML = '<p style="color: #d32f2f; text-align: center;">データの読み込みに失敗しました</p>';
+        console.error(error);
+    }
 }
 
 // ノート画面
@@ -378,10 +505,7 @@ function initChatScreen() {
     const infoBtn = document.getElementById('room-info-btn');
 
     backBtn.addEventListener('click', () => {
-        if (pollingInterval) {
-            clearInterval(pollingInterval);
-            pollingInterval = null;
-        }
+        stopGroupListener();
         currentGroup = null;
         showLobby();
     });
@@ -430,39 +554,37 @@ function leaveGroup() {
     showConfirm('このグループから退出しますか？', doLeaveGroup);
 }
 
-function doLeaveGroup() {
+async function doLeaveGroup() {
     const currentUser = Storage.getCurrentUser();
-    const groups = Storage.getGroups();
-    const users = Storage.getUsers();
 
-    // グループのメンバーリストから削除
-    if (groups[currentGroup]) {
-        groups[currentGroup].members = groups[currentGroup].members.filter(
-            name => name !== currentUser.name
-        );
-        groups[currentGroup].notes.push({
-            type: 'system',
-            text: `${currentUser.name}さんが退出しました`,
-            timestamp: Date.now()
-        });
-        Storage.saveGroups(groups);
-    }
+    try {
+        const group = await Storage.getGroup(currentGroup);
+        const user = await Storage.getUser(currentUser.name);
 
-    // ユーザーのグループリストから削除
-    if (users[currentUser.name]?.groups) {
-        users[currentUser.name].groups = users[currentUser.name].groups.filter(
-            code => code !== currentGroup
-        );
-        Storage.saveUsers(users);
-    }
+        // グループのメンバーリストから削除
+        if (group) {
+            group.members = group.members.filter(name => name !== currentUser.name);
+            await Storage.addNote(currentGroup, {
+                type: 'system',
+                text: `${currentUser.name}さんが退出しました`,
+                timestamp: Date.now()
+            });
+            await Storage.saveGroup(currentGroup, group);
+        }
 
-    // ポーリング停止してロビーへ
-    if (pollingInterval) {
-        clearInterval(pollingInterval);
-        pollingInterval = null;
+        // ユーザーのグループリストから削除
+        if (user?.groups) {
+            user.groups = user.groups.filter(code => code !== currentGroup);
+            await Storage.saveUser(currentUser.name, user);
+        }
+
+        // リスナー停止してロビーへ
+        stopGroupListener();
+        currentGroup = null;
+        showLobby();
+    } catch (error) {
+        console.error('退出エラー:', error);
     }
-    currentGroup = null;
-    showLobby();
 }
 
 // カスタム確認モーダル
@@ -500,17 +622,20 @@ function initConfirmModal() {
     });
 }
 
-function showGroupInfo() {
-    const groups = Storage.getGroups();
-    const group = groups[currentGroup];
-    if (!group) return;
+async function showGroupInfo() {
+    try {
+        const group = await Storage.getGroup(currentGroup);
+        if (!group) return;
 
-    document.getElementById('info-room-name').textContent = group.name;
-    document.getElementById('info-room-code').textContent = group.code;
-    document.getElementById('info-room-creator').textContent = group.creator;
-    document.getElementById('info-room-members').textContent = group.members.join(', ');
+        document.getElementById('info-room-name').textContent = group.name;
+        document.getElementById('info-room-code').textContent = group.code;
+        document.getElementById('info-room-creator').textContent = group.creator;
+        document.getElementById('info-room-members').textContent = group.members.join(', ');
 
-    document.getElementById('room-info-modal').classList.remove('hidden');
+        document.getElementById('room-info-modal').classList.remove('hidden');
+    } catch (error) {
+        console.error('グループ情報取得エラー:', error);
+    }
 }
 
 function showSettings() {
@@ -601,9 +726,8 @@ function applySettings() {
     document.body.classList.add(`font-${settings.fontSize}`);
 }
 
-function enterGroup(code) {
-    const groups = Storage.getGroups();
-    const group = groups[code];
+async function enterGroup(code) {
+    const group = await Storage.getGroup(code);
 
     if (!group) return;
 
@@ -612,47 +736,89 @@ function enterGroup(code) {
     document.getElementById('room-code-info').textContent = group.code;
 
     showScreen('chat-screen');
-    renderNotes();
+    renderNotes(group.notes);
 
-    // ノートのポーリング開始
-    if (pollingInterval) {
-        clearInterval(pollingInterval);
-    }
-    pollingInterval = setInterval(renderNotes, 1000);
+    // リアルタイムリスナーを設定
+    startGroupListener(code);
 }
 
-function sendNote() {
+function startGroupListener(code) {
+    stopGroupListener();
+
+    if (firebaseEnabled) {
+        // Firebaseリアルタイムリスナー
+        groupListener = db.ref('groups/' + code + '/notes').on('value', (snapshot) => {
+            const notes = snapshot.val();
+            if (notes) {
+                // オブジェクトを配列に変換
+                const notesArray = Object.values(notes);
+                renderNotes(notesArray);
+            }
+        });
+    } else {
+        // ローカルモード: ポーリング
+        groupListener = setInterval(async () => {
+            const group = await Storage.getGroup(currentGroup);
+            if (group) {
+                renderNotes(group.notes);
+            }
+        }, 1000);
+    }
+}
+
+function stopGroupListener() {
+    if (groupListener) {
+        if (firebaseEnabled) {
+            db.ref('groups/' + currentGroup + '/notes').off('value', groupListener);
+        } else {
+            clearInterval(groupListener);
+        }
+        groupListener = null;
+    }
+}
+
+async function sendNote() {
     const input = document.getElementById('message-input');
     const text = input.value.trim();
 
     if (!text || !currentGroup) return;
 
     const currentUser = Storage.getCurrentUser();
-    const groups = Storage.getGroups();
 
-    if (!groups[currentGroup]) return;
-
-    groups[currentGroup].notes.push({
+    const note = {
         type: 'user',
         sender: currentUser.name,
         text,
         timestamp: Date.now()
-    });
+    };
 
-    Storage.saveGroups(groups);
     input.value = '';
-    renderNotes();
+
+    try {
+        if (firebaseEnabled) {
+            await Storage.addNote(currentGroup, note);
+        } else {
+            const group = await Storage.getGroup(currentGroup);
+            if (group) {
+                group.notes.push(note);
+                await Storage.saveGroup(currentGroup, group);
+                renderNotes(group.notes);
+            }
+        }
+    } catch (error) {
+        console.error('送信エラー:', error);
+    }
 }
 
-function renderNotes() {
+function renderNotes(notes) {
     const container = document.getElementById('messages');
-    const groups = Storage.getGroups();
-    const group = groups[currentGroup];
     const currentUser = Storage.getCurrentUser();
 
-    if (!group) return;
+    if (!notes || !Array.isArray(notes)) {
+        notes = [];
+    }
 
-    container.innerHTML = group.notes.map(note => {
+    container.innerHTML = notes.map(note => {
         if (note.type === 'system') {
             return `<div class="message system">${note.text}</div>`;
         }
@@ -691,15 +857,19 @@ function checkAuthAndNavigate() {
     }
 }
 
-// storageイベントでリアルタイム同期
-window.addEventListener('storage', (e) => {
-    if (e.key === 'sb_groups' && currentGroup) {
-        renderNotes();
+// storageイベントでローカルモード時の同期
+window.addEventListener('storage', async (e) => {
+    if (!firebaseEnabled && e.key === 'sb_groups' && currentGroup) {
+        const group = await Storage.getGroup(currentGroup);
+        if (group) {
+            renderNotes(group.notes);
+        }
     }
 });
 
 // 初期化
 document.addEventListener('DOMContentLoaded', () => {
+    firebaseEnabled = initFirebase();
     initEntryScreen();
     initAuthScreen();
     initLobbyScreen();

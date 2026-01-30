@@ -4,13 +4,13 @@
 
 ## バージョン
 
-**v2.0.0**
+**v2.1.0**
 
 ## 概要
 
 StudyBoardは、グループでノートを共有できるWebアプリケーションです。個人情報不要で手軽に利用できます。
 
-**v2.0.0からFirebase対応！** 異なる端末間でもデータを共有できます。
+**v2.1.0からFirebase Authentication対応！** APIキーが見られても安全です。
 
 ## 機能
 
@@ -19,6 +19,7 @@ StudyBoardは、グループでノートを共有できるWebアプリケーシ�
 - **アカウント作成**: ニックネームとパスワードのみ（メールアドレス不要）
 - **ログイン/ログアウト**
 - **クロスデバイス対応**: Firebaseを設定すれば、どの端末からでもログイン可能
+- **セキュア認証**: Firebase Authenticationによる安全な認証
 
 ### グループ
 - **グループ作成**: 任意の名前でグループを作成
@@ -60,26 +61,33 @@ StudyBoardは、グループでノートを共有できるWebアプリケーシ�
 2. 「プロジェクトを追加」をクリック
 3. プロジェクト名を入力して作成
 
-### 2. Realtime Databaseを有効化
+### 2. Authentication を有効化
+1. 左メニュー「構築」→「Authentication」
+2. 「始める」をクリック
+3. 「メール / パスワード」を選択して「有効にする」
+4. 「保存」
+
+### 3. Realtime Databaseを有効化
 1. 左メニューから「Realtime Database」を選択
 2. 「データベースを作成」をクリック
-3. ロケーションを選択（asia-southeast1 など）
-4. 「テストモードで開始」を選択（後でルールを設定）
+3. ロケーションを選択（asia-southeast1 推奨）
+4. 「テストモードで開始」を選択
 
-### 3. ウェブアプリを追加
+### 4. ウェブアプリを追加
 1. プロジェクト設定（歯車アイコン）→「マイアプリ」
 2. 「</>」（ウェブ）をクリック
 3. アプリ名を入力して登録
 4. 表示される設定情報をコピー
 
-### 4. app.jsに設定を追加
-`app.js` の先頭にある `firebaseConfig` を編集:
+### 5. 設定ファイルを作成
+1. `firebase-config.example.js` を `firebase-config.js` にコピー
+2. `firebase-config.js` を編集して設定情報を入力:
 
 ```javascript
 const firebaseConfig = {
     apiKey: "あなたのAPIキー",
     authDomain: "あなたのプロジェクト.firebaseapp.com",
-    databaseURL: "https://あなたのプロジェクト-default-rtdb.firebaseio.com",
+    databaseURL: "https://あなたのプロジェクト-default-rtdb.asia-southeast1.firebasedatabase.app",
     projectId: "あなたのプロジェクト",
     storageBucket: "あなたのプロジェクト.appspot.com",
     messagingSenderId: "あなたの送信者ID",
@@ -87,23 +95,44 @@ const firebaseConfig = {
 };
 ```
 
-### 5. セキュリティルールの設定（推奨）
+**重要**: `firebase-config.js` は `.gitignore` に含まれているため、Gitにはコミットされません。
+
+### 6. セキュリティルールの設定（重要）
 Realtime Database → ルール で以下を設定:
 
 ```json
 {
   "rules": {
-    ".read": true,
-    ".write": true
+    "users": {
+      "$uid": {
+        ".read": "auth != null && auth.uid === $uid",
+        ".write": "auth != null && auth.uid === $uid"
+      }
+    },
+    "groups": {
+      "$groupCode": {
+        ".read": "auth != null",
+        ".write": "auth != null"
+      }
+    },
+    "userGroups": {
+      "$uid": {
+        ".read": "auth != null && auth.uid === $uid",
+        ".write": "auth != null && auth.uid === $uid"
+      }
+    }
   }
 }
 ```
 
-※本番環境では適切な認証ルールを設定してください
+このルールにより：
+- ログインしたユーザーのみデータにアクセス可能
+- 他人のデータは読み書き不可
+- APIキーが漏れても安全
 
 ## アクセスコードの変更
 
-`app.js` の21行目を編集:
+`app.js` の10行目を編集:
 
 ```javascript
 const SITE_PASSWORD = '1234567890';  // ここを変更
@@ -113,30 +142,48 @@ const SITE_PASSWORD = '1234567890';  // ここを変更
 
 ```
 Chatter/
-├── index.html   # メインHTML
-├── style.css    # スタイルシート
-├── app.js       # JavaScript（Firebase対応）
-├── favicon.svg  # アイコン
-└── README.md    # このファイル
+├── index.html                 # メインHTML
+├── style.css                  # スタイルシート
+├── app.js                     # JavaScript（Firebase Auth対応）
+├── firebase-config.js         # Firebase設定（※Gitに含まれない）
+├── firebase-config.example.js # Firebase設定テンプレート
+├── favicon.svg                # アイコン
+├── .gitignore                 # Git除外設定
+└── README.md                  # このファイル
 ```
 
 ## 技術仕様
 
 - **フロントエンド**: HTML / CSS / JavaScript
-- **バックエンド**: Firebase Realtime Database（オプション）
+- **認証**: Firebase Authentication
+- **データベース**: Firebase Realtime Database
 - **データ保存**:
   - オンライン: Firebase
   - オフライン: localStorage / sessionStorage
 - **同期**: Firebaseリアルタイムリスナー
 
+## セキュリティ
+
+| 保護レベル | 内容 |
+|-----------|------|
+| Firebase Auth | ログイン必須でデータアクセス |
+| セキュリティルール | 認証済みユーザーのみ読み書き可 |
+| UID制限 | 他人のユーザーデータにアクセス不可 |
+
 ## 動作モード
 
-| モード | Firebase設定 | データ共有範囲 |
-|--------|-------------|--------------|
-| ローカル | 未設定 | 同一ブラウザのみ |
-| オンライン | 設定済み | 全端末で共有 |
+| モード | Firebase設定 | データ共有範囲 | セキュリティ |
+|--------|-------------|--------------|-------------|
+| ローカル | 未設定 | 同一ブラウザのみ | 低 |
+| オンライン | 設定済み | 全端末で共有 | 高 |
 
 ## 更新履歴
+
+### v2.1.0
+- **Firebase Authentication対応**: セキュアな認証システム
+- セキュリティルールで完全保護
+- パスワードは6文字以上に変更（Firebase要件）
+- ユーザーデータをUID単位で管理
 
 ### v2.0.0
 - **Firebase対応**: 異なる端末間でデータ共有が可能に

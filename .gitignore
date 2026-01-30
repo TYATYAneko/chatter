@@ -1,0 +1,13 @@
+# Firebase設定（秘密情報）
+firebase-config.js
+
+# OS generated files
+.DS_Store
+Thumbs.db
+
+# IDE
+.vscode/
+.idea/
+
+# Logs
+*.log

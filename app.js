@@ -1,36 +1,35 @@
 // StudyBoard - グループ学習ノートアプリケーション
-// Firebase対応版 v2.0.0
+// Firebase Authentication対応版 v2.1.0
 
 // ========== Firebase設定 ==========
-// ここにFirebaseの設定を入力してください
-// Firebase Console → プロジェクト設定 → マイアプリ → ウェブアプリ からコピー
-const firebaseConfig = {
-    apiKey: "AIzaSyDeYQlqUj1NeqWIXEKy6NPdsF0tfR_5ZFM",
-  authDomain: "chatter-c4b4f.firebaseapp.com",
-  databaseURL: "https://chatter-c4b4f-default-rtdb.asia-southeast1.firebasedatabase.app",
-  projectId: "chatter-c4b4f",
-  storageBucket: "chatter-c4b4f.firebasestorage.app",
-  messagingSenderId: "399040478258",
-  appId: "1:399040478258:web:14df3793a7312a9a1b102b",
-  measurementId: "G-HE720YW3DF"
-};
+// firebase-config.js から読み込まれます
+// 設定方法: firebase-config.example.js を firebase-config.js にコピーして編集
 
 // ========== 設定 ==========
 // アクセスコード（10桁の数字）- ここを変更してください
 const SITE_PASSWORD = '1234567890';
 
+// メールドメイン（Firebase Authで使用）
+const EMAIL_DOMAIN = 'studyboard.local';
+
 // ========== Firebase初期化 ==========
 let db = null;
+let auth = null;
 let firebaseEnabled = false;
 
 function initFirebase() {
     try {
-        if (firebaseConfig.apiKey === "YOUR_API_KEY") {
+        if (typeof firebaseConfig === 'undefined') {
+            console.log('Firebase設定ファイルが見つかりません - ローカルモードで動作します');
+            return false;
+        }
+        if (!firebaseConfig.apiKey || firebaseConfig.apiKey === "YOUR_API_KEY") {
             console.log('Firebase未設定 - ローカルモードで動作します');
             return false;
         }
         firebase.initializeApp(firebaseConfig);
         db = firebase.database();
+        auth = firebase.auth();
         console.log('Firebase接続成功');
         return true;
     } catch (error) {
@@ -49,8 +48,15 @@ const Storage = {
         localStorage.setItem('sb_settings', JSON.stringify(settings));
     },
 
-    // セッション管理
+    // セッション管理（ローカルモード用）
     getCurrentUser() {
+        if (firebaseEnabled && auth.currentUser) {
+            return {
+                name: auth.currentUser.displayName || auth.currentUser.email.split('@')[0],
+                uid: auth.currentUser.uid,
+                email: auth.currentUser.email
+            };
+        }
         return JSON.parse(sessionStorage.getItem('sb_currentUser') || 'null');
     },
     setCurrentUser(user) {
@@ -66,30 +72,36 @@ const Storage = {
         sessionStorage.setItem('sb_entry', 'verified');
     },
 
-    // Firebase操作 - ユーザー
-    async getUsers() {
-        if (!firebaseEnabled) {
-            return JSON.parse(localStorage.getItem('sb_users') || '{}');
-        }
-        const snapshot = await db.ref('users').once('value');
-        return snapshot.val() || {};
-    },
-    async saveUser(name, userData) {
+    // Firebase操作 - ユーザーグループ
+    async getUserGroups(uid) {
         if (!firebaseEnabled) {
             const users = JSON.parse(localStorage.getItem('sb_users') || '{}');
-            users[name] = userData;
+            const user = Object.values(users).find(u => u.name === uid) || {};
+            return user.groups || [];
+        }
+        const snapshot = await db.ref('userGroups/' + uid).once('value');
+        return snapshot.val() || [];
+    },
+    async saveUserGroups(uid, groups) {
+        if (!firebaseEnabled) {
+            const users = JSON.parse(localStorage.getItem('sb_users') || '{}');
+            if (!users[uid]) users[uid] = { name: uid };
+            users[uid].groups = groups;
             localStorage.setItem('sb_users', JSON.stringify(users));
             return;
         }
-        await db.ref('users/' + name).set(userData);
+        await db.ref('userGroups/' + uid).set(groups);
     },
-    async getUser(name) {
-        if (!firebaseEnabled) {
-            const users = JSON.parse(localStorage.getItem('sb_users') || '{}');
-            return users[name] || null;
-        }
-        const snapshot = await db.ref('users/' + name).once('value');
-        return snapshot.val();
+
+    // ローカルモード用ユーザー管理
+    async getLocalUser(name) {
+        const users = JSON.parse(localStorage.getItem('sb_users') || '{}');
+        return users[name] || null;
+    },
+    async saveLocalUser(name, userData) {
+        const users = JSON.parse(localStorage.getItem('sb_users') || '{}');
+        users[name] = userData;
+        localStorage.setItem('sb_users', JSON.stringify(users));
     },
 
     // Firebase操作 - グループ
@@ -152,10 +164,22 @@ function showScreen(screenId) {
 }
 
 function showLoading(show) {
-    // ボタンの無効化などでローディング状態を表現
     document.querySelectorAll('.btn.primary').forEach(btn => {
         btn.disabled = show;
     });
+}
+
+function getFirebaseErrorMessage(errorCode) {
+    const messages = {
+        'auth/email-already-in-use': 'このニックネームは既に使用されています',
+        'auth/invalid-email': 'ニックネームが無効です',
+        'auth/weak-password': 'パスワードは6文字以上で入力してください',
+        'auth/user-not-found': 'ユーザーが見つかりません',
+        'auth/wrong-password': 'パスワードが正しくありません',
+        'auth/invalid-credential': 'ニックネームまたはパスワードが正しくありません',
+        'auth/too-many-requests': 'しばらく時間をおいてから再度お試しください'
+    };
+    return messages[errorCode] || '接続エラーが発生しました';
 }
 
 // ========== 画面管理 ==========
@@ -224,19 +248,33 @@ function initAuthScreen() {
         }
 
         showLoading(true);
-        try {
-            const user = await Storage.getUser(name);
-            if (!user || user.password !== password) {
-                loginError.textContent = 'ニックネームまたはパスワードが正しくありません';
-                showLoading(false);
-                return;
-            }
+        loginError.textContent = '';
 
-            Storage.setCurrentUser({ name });
-            showLobby();
-        } catch (error) {
-            loginError.textContent = '接続エラーが発生しました';
-            console.error(error);
+        if (firebaseEnabled) {
+            // Firebase Authentication
+            const email = `${name}@${EMAIL_DOMAIN}`;
+            try {
+                await auth.signInWithEmailAndPassword(email, password);
+                showLobby();
+            } catch (error) {
+                loginError.textContent = getFirebaseErrorMessage(error.code);
+                console.error(error);
+            }
+        } else {
+            // ローカルモード
+            try {
+                const user = await Storage.getLocalUser(name);
+                if (!user || user.password !== password) {
+                    loginError.textContent = 'ニックネームまたはパスワードが正しくありません';
+                    showLoading(false);
+                    return;
+                }
+                Storage.setCurrentUser({ name });
+                showLobby();
+            } catch (error) {
+                loginError.textContent = '接続エラーが発生しました';
+                console.error(error);
+            }
         }
         showLoading(false);
     });
@@ -258,7 +296,10 @@ function initAuthScreen() {
             return;
         }
 
-        if (password.length < 4) {
+        if (firebaseEnabled && password.length < 6) {
+            registerError.textContent = 'パスワードは6文字以上で入力してください';
+            return;
+        } else if (!firebaseEnabled && password.length < 4) {
             registerError.textContent = 'パスワードは4文字以上で入力してください';
             return;
         }
@@ -269,20 +310,36 @@ function initAuthScreen() {
         }
 
         showLoading(true);
-        try {
-            const existingUser = await Storage.getUser(name);
-            if (existingUser) {
-                registerError.textContent = 'このニックネームは既に使用されています';
-                showLoading(false);
-                return;
-            }
+        registerError.textContent = '';
 
-            await Storage.saveUser(name, { password, groups: [] });
-            Storage.setCurrentUser({ name });
-            showLobby();
-        } catch (error) {
-            registerError.textContent = '接続エラーが発生しました';
-            console.error(error);
+        if (firebaseEnabled) {
+            // Firebase Authentication
+            const email = `${name}@${EMAIL_DOMAIN}`;
+            try {
+                const userCredential = await auth.createUserWithEmailAndPassword(email, password);
+                await userCredential.user.updateProfile({ displayName: name });
+                await Storage.saveUserGroups(userCredential.user.uid, []);
+                showLobby();
+            } catch (error) {
+                registerError.textContent = getFirebaseErrorMessage(error.code);
+                console.error(error);
+            }
+        } else {
+            // ローカルモード
+            try {
+                const existingUser = await Storage.getLocalUser(name);
+                if (existingUser) {
+                    registerError.textContent = 'このニックネームは既に使用されています';
+                    showLoading(false);
+                    return;
+                }
+                await Storage.saveLocalUser(name, { name, password, groups: [] });
+                Storage.setCurrentUser({ name });
+                showLobby();
+            } catch (error) {
+                registerError.textContent = '接続エラーが発生しました';
+                console.error(error);
+            }
         }
         showLoading(false);
     });
@@ -310,7 +367,10 @@ function initLobbyScreen() {
     const groupName = document.getElementById('room-name');
     const joinCode = document.getElementById('join-code');
 
-    logoutBtn.addEventListener('click', () => {
+    logoutBtn.addEventListener('click', async () => {
+        if (firebaseEnabled) {
+            await auth.signOut();
+        }
         Storage.clearCurrentUser();
         showScreen('auth-screen');
     });
@@ -330,7 +390,6 @@ function initLobbyScreen() {
             const groups = await Storage.getGroups();
             let code;
 
-            // ユーザーがコードを入力した場合
             const userCode = codeInput.value.trim().toUpperCase();
             if (userCode) {
                 if (!/^[A-Z0-9]{6}$/.test(userCode)) {
@@ -358,21 +417,21 @@ function initLobbyScreen() {
                 notes: [{
                     type: 'system',
                     text: `${currentUser.name}さんがグループを作成しました`,
-                    timestamp: Date.now()
+                    timestamp: Date.now(),
+                    sender: currentUser.name
                 }],
                 members: [currentUser.name]
             };
             await Storage.saveGroup(code, newGroup);
 
             // ユーザーのグループリストに追加
-            const user = await Storage.getUser(currentUser.name);
-            if (!user.groups) user.groups = [];
-            if (!user.groups.includes(code)) {
-                user.groups.push(code);
+            const uid = firebaseEnabled ? currentUser.uid : currentUser.name;
+            const userGroups = await Storage.getUserGroups(uid);
+            if (!userGroups.includes(code)) {
+                userGroups.push(code);
             }
-            await Storage.saveUser(currentUser.name, user);
+            await Storage.saveUserGroups(uid, userGroups);
 
-            // コード表示
             document.getElementById('generated-code').textContent = code;
             document.getElementById('room-code-display').classList.remove('hidden');
             createError.textContent = '';
@@ -417,24 +476,23 @@ function initLobbyScreen() {
 
             const currentUser = Storage.getCurrentUser();
 
-            // メンバーに追加
             if (!group.members.includes(currentUser.name)) {
                 group.members.push(currentUser.name);
                 await Storage.addNote(code, {
                     type: 'system',
                     text: `${currentUser.name}さんが参加しました`,
-                    timestamp: Date.now()
+                    timestamp: Date.now(),
+                    sender: currentUser.name
                 });
                 await Storage.saveGroup(code, group);
             }
 
-            // ユーザーのグループリストに追加
-            const user = await Storage.getUser(currentUser.name);
-            if (!user.groups) user.groups = [];
-            if (!user.groups.includes(code)) {
-                user.groups.push(code);
+            const uid = firebaseEnabled ? currentUser.uid : currentUser.name;
+            const userGroups = await Storage.getUserGroups(uid);
+            if (!userGroups.includes(code)) {
+                userGroups.push(code);
             }
-            await Storage.saveUser(currentUser.name, user);
+            await Storage.saveUserGroups(uid, userGroups);
 
             joinCode.value = '';
             joinError.textContent = '';
@@ -464,12 +522,11 @@ async function updateMyGroups() {
     const currentUser = Storage.getCurrentUser();
 
     try {
-        const user = await Storage.getUser(currentUser.name);
+        const uid = firebaseEnabled ? currentUser.uid : currentUser.name;
+        const userGroups = await Storage.getUserGroups(uid);
         const groups = await Storage.getGroups();
 
-        const userGroups = user?.groups || [];
-
-        if (userGroups.length === 0) {
+        if (!userGroups || userGroups.length === 0) {
             container.innerHTML = '<p style="color: #888; text-align: center;">参加中のグループはありません</p>';
             return;
         }
@@ -511,13 +568,11 @@ function initChatScreen() {
         showLobby();
     });
 
-    // メニュー開閉
     menuBtn.addEventListener('click', (e) => {
         e.stopPropagation();
         dropdownMenu.classList.toggle('hidden');
     });
 
-    // メニュー外クリックで閉じる
     document.addEventListener('click', () => {
         dropdownMenu.classList.add('hidden');
     });
@@ -526,19 +581,16 @@ function initChatScreen() {
         e.stopPropagation();
     });
 
-    // グループ情報
     infoBtn.addEventListener('click', () => {
         dropdownMenu.classList.add('hidden');
         showGroupInfo();
     });
 
-    // 設定
     settingsBtn.addEventListener('click', () => {
         dropdownMenu.classList.add('hidden');
         showSettings();
     });
 
-    // 退出
     leaveBtn.addEventListener('click', () => {
         dropdownMenu.classList.add('hidden');
         leaveGroup();
@@ -560,26 +612,25 @@ async function doLeaveGroup() {
 
     try {
         const group = await Storage.getGroup(currentGroup);
-        const user = await Storage.getUser(currentUser.name);
+        const uid = firebaseEnabled ? currentUser.uid : currentUser.name;
+        const userGroups = await Storage.getUserGroups(uid);
 
-        // グループのメンバーリストから削除
         if (group) {
             group.members = group.members.filter(name => name !== currentUser.name);
             await Storage.addNote(currentGroup, {
                 type: 'system',
                 text: `${currentUser.name}さんが退出しました`,
-                timestamp: Date.now()
+                timestamp: Date.now(),
+                sender: currentUser.name
             });
             await Storage.saveGroup(currentGroup, group);
         }
 
-        // ユーザーのグループリストから削除
-        if (user?.groups) {
-            user.groups = user.groups.filter(code => code !== currentGroup);
-            await Storage.saveUser(currentUser.name, user);
+        if (userGroups) {
+            const newGroups = userGroups.filter(code => code !== currentGroup);
+            await Storage.saveUserGroups(uid, newGroups);
         }
 
-        // リスナー停止してロビーへ
         stopGroupListener();
         currentGroup = null;
         showLobby();
@@ -642,7 +693,6 @@ async function showGroupInfo() {
 function showSettings() {
     const settings = Storage.getSettings();
 
-    // 現在の設定をUIに反映
     document.querySelectorAll('.theme-btn').forEach(btn => {
         btn.classList.toggle('active', btn.dataset.theme === settings.theme);
     });
@@ -659,7 +709,6 @@ function initSettings() {
     const closeSettings = document.getElementById('close-settings');
     const closeInfo = document.getElementById('close-room-info');
 
-    // モーダルを閉じる
     closeSettings.addEventListener('click', () => {
         settingsModal.classList.add('hidden');
     });
@@ -668,7 +717,6 @@ function initSettings() {
         infoModal.classList.add('hidden');
     });
 
-    // モーダル背景クリックで閉じる
     settingsModal.addEventListener('click', (e) => {
         if (e.target === settingsModal) {
             settingsModal.classList.add('hidden');
@@ -681,7 +729,6 @@ function initSettings() {
         }
     });
 
-    // テーマ切り替え
     document.querySelectorAll('.theme-btn').forEach(btn => {
         btn.addEventListener('click', () => {
             const theme = btn.dataset.theme;
@@ -695,7 +742,6 @@ function initSettings() {
         });
     });
 
-    // フォントサイズ切り替え
     document.querySelectorAll('.font-btn').forEach(btn => {
         btn.addEventListener('click', () => {
             const size = btn.dataset.size;
@@ -709,20 +755,17 @@ function initSettings() {
         });
     });
 
-    // 初期設定を適用
     applySettings();
 }
 
 function applySettings() {
     const settings = Storage.getSettings();
 
-    // テーマ
     document.body.classList.remove('theme-light', 'theme-dark', 'theme-blue', 'theme-green');
     if (settings.theme !== 'light') {
         document.body.classList.add(`theme-${settings.theme}`);
     }
 
-    // フォントサイズ
     document.body.classList.remove('font-small', 'font-medium', 'font-large');
     document.body.classList.add(`font-${settings.fontSize}`);
 }
@@ -739,7 +782,6 @@ async function enterGroup(code) {
     showScreen('chat-screen');
     renderNotes(group.notes);
 
-    // リアルタイムリスナーを設定
     startGroupListener(code);
 }
 
@@ -747,17 +789,14 @@ function startGroupListener(code) {
     stopGroupListener();
 
     if (firebaseEnabled) {
-        // Firebaseリアルタイムリスナー
         groupListener = db.ref('groups/' + code + '/notes').on('value', (snapshot) => {
             const notes = snapshot.val();
             if (notes) {
-                // オブジェクトを配列に変換
                 const notesArray = Object.values(notes);
                 renderNotes(notesArray);
             }
         });
     } else {
-        // ローカルモード: ポーリング
         groupListener = setInterval(async () => {
             const group = await Storage.getGroup(currentGroup);
             if (group) {
@@ -850,11 +889,23 @@ function checkAuthAndNavigate() {
         return;
     }
 
-    const currentUser = Storage.getCurrentUser();
-    if (currentUser) {
+    if (firebaseEnabled && auth.currentUser) {
+        showLobby();
+    } else if (!firebaseEnabled && Storage.getCurrentUser()) {
         showLobby();
     } else {
         showScreen('auth-screen');
+    }
+}
+
+// Firebase Auth状態監視
+function setupAuthListener() {
+    if (firebaseEnabled) {
+        auth.onAuthStateChanged((user) => {
+            if (user && Storage.isEntryVerified()) {
+                showLobby();
+            }
+        });
     }
 }
 
@@ -871,6 +922,7 @@ window.addEventListener('storage', async (e) => {
 // 初期化
 document.addEventListener('DOMContentLoaded', () => {
     firebaseEnabled = initFirebase();
+    setupAuthListener();
     initEntryScreen();
     initAuthScreen();
     initLobbyScreen();

@@ -1031,3 +1031,98 @@ body.theme-dark .version {
         max-width: 85%;
     }
 }
+
+/* 画像アップロードボタン */
+.image-upload-btn {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 44px;
+    height: 44px;
+    border-radius: 50%;
+    background: #f0f0f0;
+    cursor: pointer;
+    transition: background 0.2s;
+    flex-shrink: 0;
+}
+
+.image-upload-btn:hover {
+    background: #e0e0e0;
+}
+
+.image-upload-btn.uploading {
+    opacity: 0.5;
+    pointer-events: none;
+}
+
+.image-upload-btn svg {
+    color: #666;
+}
+
+/* 画像メッセージ */
+.image-content {
+    margin: 4px 0;
+}
+
+.image-content img {
+    max-width: 100%;
+    max-height: 300px;
+    border-radius: 8px;
+    cursor: pointer;
+    transition: opacity 0.2s;
+}
+
+.image-content img:hover {
+    opacity: 0.9;
+}
+
+/* 画像モーダル */
+.image-modal {
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background: rgba(0, 0, 0, 0.9);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 1000;
+}
+
+.image-modal-content {
+    position: relative;
+    max-width: 90%;
+    max-height: 90%;
+}
+
+.image-modal-content img {
+    max-width: 100%;
+    max-height: 90vh;
+    border-radius: 8px;
+}
+
+.image-modal-close {
+    position: absolute;
+    top: -40px;
+    right: 0;
+    background: none;
+    border: none;
+    color: white;
+    font-size: 32px;
+    cursor: pointer;
+    padding: 8px;
+}
+
+/* ダークテーマ対応 */
+body.theme-dark .image-upload-btn {
+    background: #404040;
+}
+
+body.theme-dark .image-upload-btn:hover {
+    background: #505050;
+}
+
+body.theme-dark .image-upload-btn svg {
+    color: #aaa;
+}

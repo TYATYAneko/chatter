@@ -4,7 +4,7 @@
 
 ## バージョン
 
-**v2.2.2**
+**v2.3.1**
 
 ## 概要
 
@@ -30,6 +30,7 @@ StudyBoardは、グループでノートを共有できるWebアプリケーシ�
 
 ### ノート共有
 - **メモ投稿**: テキストメモの投稿・共有
+- **画像送信**: 画像ファイルの送信・共有（5MBまで、Base64形式）
 - **リアルタイム更新**: Firebaseでリアルタイム同期
 - **システム通知**: 参加・退出の通知
 
@@ -127,14 +128,12 @@ const SITE_PASSWORD = '1234567890';  // ここを変更
 
 ```
 Chatter/
-├── index.html                 # メインHTML
-├── style.css                  # スタイルシート
-├── app.js                     # JavaScript（Firebase Auth対応）
-├── firebase-config.js         # Firebase設定（※Gitに含まれない）
-├── firebase-config.example.js # Firebase設定テンプレート
-├── favicon.svg                # アイコン
-├── .gitignore                 # Git除外設定
-└── README.md                  # このファイル
+├── index.html    # メインHTML（Firebase設定を含む）
+├── style.css     # スタイルシート
+├── app.js        # JavaScript（Firebase Auth/Storage対応）
+├── favicon.svg   # アイコン
+├── .gitignore    # Git除外設定
+└── README.md     # このファイル
 ```
 
 ## 技術仕様
@@ -142,6 +141,7 @@ Chatter/
 - **フロントエンド**: HTML / CSS / JavaScript
 - **認証**: Firebase Authentication
 - **データベース**: Firebase Realtime Database
+- **画像保存**: Base64エンコード（Realtime Databaseに保存）
 - **データ保存**:
   - オンライン: Firebase
   - オフライン: localStorage / sessionStorage
@@ -163,6 +163,16 @@ Chatter/
 | オンライン | 設定済み | 全端末で共有 | 高 |
 
 ## 更新履歴
+
+### v2.3.1
+- 画像保存方式をBase64に変更（Firebase Storageが不要に）
+- Firebase Storage SDKを削除
+- 無料プランでも画像送信が可能
+
+### v2.3.0
+- **画像送信機能追加**: チャットで画像を送信可能に
+- 画像クリックで拡大表示
+- 5MBまでの画像に対応
 
 ### v2.2.2
 - 不要なデバッグログを削除

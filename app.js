@@ -1,9 +1,10 @@
 // StudyBoard - グループ学習ノートアプリケーション
-// Firebase Authentication対応版 v2.2.2
+// Firebase Authentication対応版 v2.3.1
 
 // ========== 設定 ==========
 const SITE_PASSWORD = '1234567890'; // アクセスコード（10桁の数字）
 const EMAIL_DOMAIN = 'studyboard.local'; // Firebase Auth用メールドメイン
+const MAX_IMAGE_SIZE = 5 * 1024 * 1024; // 5MB
 
 // ========== Firebase初期化 ==========
 let db = null;
@@ -681,6 +682,79 @@ function initChatScreen() {
     noteInput.addEventListener('keypress', (e) => {
         if (e.key === 'Enter') sendNote();
     });
+
+    // 画像アップロード
+    const imageInput = document.getElementById('image-input');
+    imageInput.addEventListener('change', async (e) => {
+        const file = e.target.files[0];
+        if (!file) return;
+
+        if (!file.type.startsWith('image/')) {
+            alert('画像ファイルを選択してください');
+            imageInput.value = '';
+            return;
+        }
+
+        if (file.size > MAX_IMAGE_SIZE) {
+            alert('画像サイズは5MB以下にしてください');
+            imageInput.value = '';
+            return;
+        }
+
+        await sendImage(file);
+        imageInput.value = '';
+    });
+}
+
+async function sendImage(file) {
+    if (!currentGroup) return;
+
+    const currentUser = Storage.getCurrentUser();
+    const timestamp = Date.now();
+
+    // アップロード中の表示
+    const sendBtn = document.getElementById('send-btn');
+    const imageBtn = document.querySelector('.image-upload-btn');
+    sendBtn.disabled = true;
+    imageBtn.classList.add('uploading');
+
+    try {
+        // Base64に変換してRealtime Databaseに保存
+        const imageUrl = await fileToBase64(file);
+
+        const note = {
+            type: 'image',
+            sender: currentUser.name,
+            imageUrl: imageUrl,
+            timestamp: timestamp
+        };
+
+        if (firebaseEnabled) {
+            await Storage.addNote(currentGroup, note);
+        } else {
+            const group = await Storage.getGroup(currentGroup);
+            if (group) {
+                group.notes.push(note);
+                await Storage.saveGroup(currentGroup, group);
+                renderNotes(group.notes);
+            }
+        }
+    } catch (error) {
+        console.error('画像送信エラー:', error);
+        alert('画像の送信に失敗しました');
+    } finally {
+        sendBtn.disabled = false;
+        imageBtn.classList.remove('uploading');
+    }
+}
+
+function fileToBase64(file) {
+    return new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = () => resolve(reader.result);
+        reader.onerror = reject;
+        reader.readAsDataURL(file);
+    });
 }
 
 function leaveGroup() {
@@ -1038,6 +1112,19 @@ function renderNotes(notes) {
         }
 
         const isOwn = note.sender === currentUser.name;
+
+        if (note.type === 'image') {
+            return `
+                <div class="message ${isOwn ? 'own' : 'other'}">
+                    ${!isOwn ? `<div class="sender">${note.sender}</div>` : ''}
+                    <div class="image-content">
+                        <img src="${note.imageUrl}" alt="画像" onclick="openImageModal(this.src)">
+                    </div>
+                    <div class="time">${formatTime(note.timestamp)}</div>
+                </div>
+            `;
+        }
+
         return `
             <div class="message ${isOwn ? 'own' : 'other'}">
                 ${!isOwn ? `<div class="sender">${note.sender}</div>` : ''}
@@ -1049,6 +1136,25 @@ function renderNotes(notes) {
 
     container.scrollTop = container.scrollHeight;
 }
+
+function openImageModal(src) {
+    const modal = document.createElement('div');
+    modal.className = 'image-modal';
+    modal.innerHTML = `
+        <div class="image-modal-content">
+            <img src="${src}" alt="画像">
+            <button class="image-modal-close">×</button>
+        </div>
+    `;
+    modal.addEventListener('click', (e) => {
+        if (e.target === modal || e.target.classList.contains('image-modal-close')) {
+            modal.remove();
+        }
+    });
+    document.body.appendChild(modal);
+}
+
+window.openImageModal = openImageModal;
 
 function escapeHtml(text) {
     const div = document.createElement('div');

@@ -4,7 +4,7 @@
 
 ## バージョン
 
-**v2.1.3**
+**v2.2.2**
 
 ## 概要
 
@@ -79,23 +79,8 @@ StudyBoardは、グループでノートを共有できるWebアプリケーシ�
 3. アプリ名を入力して登録
 4. 表示される設定情報をコピー
 
-### 5. 設定ファイルを作成
-1. `firebase-config.example.js` を `firebase-config.js` にコピー
-2. `firebase-config.js` を編集して設定情報を入力:
-
-```javascript
-const firebaseConfig = {
-    apiKey: "あなたのAPIキー",
-    authDomain: "あなたのプロジェクト.firebaseapp.com",
-    databaseURL: "https://あなたのプロジェクト-default-rtdb.asia-southeast1.firebasedatabase.app",
-    projectId: "あなたのプロジェクト",
-    storageBucket: "あなたのプロジェクト.appspot.com",
-    messagingSenderId: "あなたの送信者ID",
-    appId: "あなたのアプリID"
-};
-```
-
-**重要**: `firebase-config.js` は `.gitignore` に含まれているため、Gitにはコミットされません。
+### 5. 設定をindex.htmlに入力
+`index.html` の `firebaseConfig` セクションを編集して設定情報を入力してください。
 
 ### 6. セキュリティルールの設定（重要）
 Realtime Database → ルール で以下を設定:
@@ -178,6 +163,36 @@ Chatter/
 | オンライン | 設定済み | 全端末で共有 | 高 |
 
 ## 更新履歴
+
+### v2.2.2
+- 不要なデバッグログを削除
+- firebase-config関連ファイルを削除（設定はindex.htmlにインライン化済み）
+- READMEのFirebaseセットアップ手順を更新
+
+### v2.2.0
+- **通知システム追加**: 新着メッセージをブラウザ通知でお知らせ
+- グループごとに通知ON/OFF設定可能
+- グループ情報からトグルで切り替え
+- 自分のメッセージは通知しない
+- 参加・退出メッセージも通知
+
+### v2.2.1
+- 設定モーダルから通知のON/OFFを変更可能に
+
+### v2.1.6
+- 参加・退出時のシステムメッセージが正しく表示されるよう修正
+- Firebase/ローカル両対応の保存処理を改善
+
+### v2.1.5
+- 未読メッセージ数をバッジで表示（赤色、最大99+）
+- グループを開くと自動で既読に
+- リアルタイムで既読状態を更新
+
+### v2.1.4
+- チャット画面の完全固定化
+- 投稿ボタンのサイズを固定幅（70px）に変更
+- メッセージエリアのスクロール改善
+- オーバースクロール防止
 
 ### v2.1.3
 - スマホでの画面スクロール・ドラッグを防止

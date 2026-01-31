@@ -1,16 +1,9 @@
 // StudyBoard - グループ学習ノートアプリケーション
-// Firebase Authentication対応版 v2.1.3
-
-// ========== Firebase設定 ==========
-// firebase-config.js から読み込まれます
-// 設定方法: firebase-config.example.js を firebase-config.js にコピーして編集
+// Firebase Authentication対応版 v2.2.2
 
 // ========== 設定 ==========
-// アクセスコード（10桁の数字）- ここを変更してください
-const SITE_PASSWORD = '1234567890';
-
-// メールドメイン（Firebase Authで使用）
-const EMAIL_DOMAIN = 'studyboard.local';
+const SITE_PASSWORD = '1234567890'; // アクセスコード（10桁の数字）
+const EMAIL_DOMAIN = 'studyboard.local'; // Firebase Auth用メールドメイン
 
 // ========== Firebase初期化 ==========
 let db = null;
@@ -19,30 +12,15 @@ let firebaseEnabled = false;
 
 function initFirebase() {
     try {
-        console.log('Firebase初期化開始...');
-        console.log('firebaseConfig存在:', typeof firebaseConfig !== 'undefined');
-
-        if (typeof firebaseConfig === 'undefined') {
-            console.log('Firebase設定ファイルが見つかりません - ローカルモードで動作します');
+        if (typeof firebaseConfig === 'undefined' || typeof firebase === 'undefined') {
             return false;
         }
-
-        console.log('firebaseConfig.apiKey:', firebaseConfig.apiKey ? '設定済み' : '未設定');
-
         if (!firebaseConfig.apiKey || firebaseConfig.apiKey === "YOUR_API_KEY") {
-            console.log('Firebase未設定 - ローカルモードで動作します');
             return false;
         }
-
-        if (typeof firebase === 'undefined') {
-            console.log('Firebase SDKが読み込まれていません - ローカルモードで動作します');
-            return false;
-        }
-
         firebase.initializeApp(firebaseConfig);
         db = firebase.database();
         auth = firebase.auth();
-        console.log('Firebase接続成功 - オンラインモードで動作します');
         return true;
     } catch (error) {
         console.error('Firebase初期化エラー:', error);
@@ -58,6 +36,35 @@ const Storage = {
     },
     saveSettings(settings) {
         localStorage.setItem('sb_settings', JSON.stringify(settings));
+    },
+
+    // 既読管理
+    getReadCounts() {
+        return JSON.parse(localStorage.getItem('sb_readCounts') || '{}');
+    },
+    setReadCount(groupCode, count) {
+        const readCounts = this.getReadCounts();
+        readCounts[groupCode] = count;
+        localStorage.setItem('sb_readCounts', JSON.stringify(readCounts));
+    },
+    getUnreadCount(groupCode, totalCount) {
+        const readCounts = this.getReadCounts();
+        const lastRead = readCounts[groupCode] || 0;
+        return Math.max(0, totalCount - lastRead);
+    },
+
+    // 通知設定
+    getNotificationSettings() {
+        return JSON.parse(localStorage.getItem('sb_notifications') || '{}');
+    },
+    isNotificationEnabled(groupCode) {
+        const settings = this.getNotificationSettings();
+        return settings[groupCode] === true;
+    },
+    setNotificationEnabled(groupCode, enabled) {
+        const settings = this.getNotificationSettings();
+        settings[groupCode] = enabled;
+        localStorage.setItem('sb_notifications', JSON.stringify(settings));
     },
 
     // セッション管理（ローカルモード用）
@@ -152,6 +159,53 @@ const Storage = {
         }
         const notesRef = db.ref('groups/' + code + '/notes');
         await notesRef.push(note);
+    }
+};
+
+// ========== 通知システム ==========
+const Notification = {
+    // 通知権限をリクエスト
+    async requestPermission() {
+        if (!('Notification' in window)) {
+            console.log('このブラウザは通知をサポートしていません');
+            return false;
+        }
+        if (window.Notification.permission === 'granted') {
+            return true;
+        }
+        if (window.Notification.permission !== 'denied') {
+            const permission = await window.Notification.requestPermission();
+            return permission === 'granted';
+        }
+        return false;
+    },
+
+    // 通知を送信
+    async send(title, body, groupCode) {
+        if (!('Notification' in window)) return;
+        if (window.Notification.permission !== 'granted') return;
+        if (document.visibilityState === 'visible' && currentGroup === groupCode) return;
+
+        try {
+            const notification = new window.Notification(title, {
+                body: body,
+                icon: 'favicon.svg',
+                tag: groupCode,
+                renotify: true
+            });
+
+            notification.onclick = () => {
+                window.focus();
+                if (groupCode && groupCode !== currentGroup) {
+                    enterGroup(groupCode);
+                }
+                notification.close();
+            };
+
+            setTimeout(() => notification.close(), 5000);
+        } catch (error) {
+            console.error('通知エラー:', error);
+        }
     }
 };
 
@@ -490,13 +544,23 @@ function initLobbyScreen() {
 
             if (!group.members.includes(currentUser.name)) {
                 group.members.push(currentUser.name);
-                await Storage.addNote(code, {
+                const joinNote = {
                     type: 'system',
                     text: `${currentUser.name}さんが参加しました`,
                     timestamp: Date.now(),
                     sender: currentUser.name
-                });
-                await Storage.saveGroup(code, group);
+                };
+
+                if (firebaseEnabled) {
+                    // Firebaseの場合は個別に更新
+                    await db.ref('groups/' + code + '/members').set(group.members);
+                    await db.ref('groups/' + code + '/notes').push(joinNote);
+                } else {
+                    // ローカルの場合はグループに追加して保存
+                    if (!group.notes) group.notes = [];
+                    group.notes.push(joinNote);
+                    await Storage.saveGroup(code, group);
+                }
             }
 
             const uid = firebaseEnabled ? currentUser.uid : currentUser.name;
@@ -547,10 +611,15 @@ async function updateMyGroups() {
             .filter(code => groups[code])
             .map(code => {
                 const group = groups[code];
+                const noteCount = group.notes ? (Array.isArray(group.notes) ? group.notes.length : Object.keys(group.notes).length) : 0;
+                const unreadCount = Storage.getUnreadCount(code, noteCount);
+                const unreadBadge = unreadCount > 0
+                    ? `<span class="unread-badge">${unreadCount > 99 ? '99+' : unreadCount}</span>`
+                    : '';
                 return `
                     <div class="room-item">
                         <div class="room-info">
-                            <span class="room-name">${group.name}</span>
+                            <span class="room-name">${group.name}${unreadBadge}</span>
                             <span class="room-code">${group.code}</span>
                         </div>
                         <button class="btn small" onclick="enterGroup('${group.code}')">開く</button>
@@ -629,13 +698,23 @@ async function doLeaveGroup() {
 
         if (group) {
             group.members = group.members.filter(name => name !== currentUser.name);
-            await Storage.addNote(currentGroup, {
+            const leaveNote = {
                 type: 'system',
                 text: `${currentUser.name}さんが退出しました`,
                 timestamp: Date.now(),
                 sender: currentUser.name
-            });
-            await Storage.saveGroup(currentGroup, group);
+            };
+
+            if (firebaseEnabled) {
+                // Firebaseの場合は個別に更新
+                await db.ref('groups/' + currentGroup + '/members').set(group.members);
+                await db.ref('groups/' + currentGroup + '/notes').push(leaveNote);
+            } else {
+                // ローカルの場合はグループに追加して保存
+                if (!group.notes) group.notes = [];
+                group.notes.push(leaveNote);
+                await Storage.saveGroup(currentGroup, group);
+            }
         }
 
         if (userGroups) {
@@ -696,6 +775,10 @@ async function showGroupInfo() {
         document.getElementById('info-room-creator').textContent = group.creator;
         document.getElementById('info-room-members').textContent = group.members.join(', ');
 
+        // 通知設定を反映
+        const notificationToggle = document.getElementById('notification-toggle');
+        notificationToggle.checked = Storage.isNotificationEnabled(currentGroup);
+
         document.getElementById('room-info-modal').classList.remove('hidden');
     } catch (error) {
         console.error('グループ情報取得エラー:', error);
@@ -711,6 +794,10 @@ function showSettings() {
     document.querySelectorAll('.font-btn').forEach(btn => {
         btn.classList.toggle('active', btn.dataset.size === settings.fontSize);
     });
+
+    // 通知設定を反映
+    const settingsNotificationToggle = document.getElementById('settings-notification-toggle');
+    settingsNotificationToggle.checked = Storage.isNotificationEnabled(currentGroup);
 
     document.getElementById('settings-modal').classList.remove('hidden');
 }
@@ -767,6 +854,34 @@ function initSettings() {
         });
     });
 
+    // 通知トグル（グループ情報モーダル）
+    const notificationToggle = document.getElementById('notification-toggle');
+    notificationToggle.addEventListener('change', async () => {
+        if (notificationToggle.checked) {
+            const granted = await Notification.requestPermission();
+            if (!granted) {
+                notificationToggle.checked = false;
+                alert('通知の許可が必要です。ブラウザの設定で通知を許可してください。');
+                return;
+            }
+        }
+        Storage.setNotificationEnabled(currentGroup, notificationToggle.checked);
+    });
+
+    // 通知トグル（設定モーダル）
+    const settingsNotificationToggle = document.getElementById('settings-notification-toggle');
+    settingsNotificationToggle.addEventListener('change', async () => {
+        if (settingsNotificationToggle.checked) {
+            const granted = await Notification.requestPermission();
+            if (!granted) {
+                settingsNotificationToggle.checked = false;
+                alert('通知の許可が必要です。ブラウザの設定で通知を許可してください。');
+                return;
+            }
+        }
+        Storage.setNotificationEnabled(currentGroup, settingsNotificationToggle.checked);
+    });
+
     applySettings();
 }
 
@@ -791,30 +906,77 @@ async function enterGroup(code) {
     document.getElementById('room-title').textContent = group.name;
     document.getElementById('room-code-info').textContent = group.code;
 
+    // 既読にする
+    const noteCount = group.notes ? (Array.isArray(group.notes) ? group.notes.length : Object.keys(group.notes).length) : 0;
+    Storage.setReadCount(code, noteCount);
+
     showScreen('chat-screen');
     renderNotes(group.notes);
 
     startGroupListener(code);
 }
 
+let lastNoteCount = 0;
+
 function startGroupListener(code) {
     stopGroupListener();
+    lastNoteCount = 0;
 
     if (firebaseEnabled) {
-        groupListener = db.ref('groups/' + code + '/notes').on('value', (snapshot) => {
+        let isFirstLoad = true;
+        groupListener = db.ref('groups/' + code + '/notes').on('value', async (snapshot) => {
             const notes = snapshot.val();
             if (notes) {
                 const notesArray = Object.values(notes);
                 renderNotes(notesArray);
+
+                // 新着メッセージの通知（初回ロード以外）
+                if (!isFirstLoad && notesArray.length > lastNoteCount) {
+                    const newNotes = notesArray.slice(lastNoteCount);
+                    await sendNotifications(code, newNotes);
+                }
+                lastNoteCount = notesArray.length;
+                isFirstLoad = false;
+
+                // 既読を更新
+                Storage.setReadCount(code, notesArray.length);
             }
         });
     } else {
         groupListener = setInterval(async () => {
             const group = await Storage.getGroup(currentGroup);
             if (group) {
+                const noteCount = group.notes ? group.notes.length : 0;
+
+                // 新着メッセージの通知
+                if (noteCount > lastNoteCount && lastNoteCount > 0) {
+                    const newNotes = group.notes.slice(lastNoteCount);
+                    await sendNotifications(currentGroup, newNotes);
+                }
+                lastNoteCount = noteCount;
+
                 renderNotes(group.notes);
+                // 既読を更新
+                Storage.setReadCount(currentGroup, noteCount);
             }
         }, 1000);
+    }
+}
+
+async function sendNotifications(groupCode, newNotes) {
+    if (!Storage.isNotificationEnabled(groupCode)) return;
+
+    const currentUser = Storage.getCurrentUser();
+    const group = await Storage.getGroup(groupCode);
+    const groupName = group ? group.name : 'グループ';
+
+    for (const note of newNotes) {
+        // 自分のメッセージは通知しない
+        if (note.sender === currentUser.name) continue;
+        // システムメッセージも通知
+        const title = `${groupName}`;
+        const body = note.type === 'system' ? note.text : `${note.sender}: ${note.text}`;
+        await Notification.send(title, body, groupCode);
     }
 }
 

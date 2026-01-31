@@ -292,6 +292,20 @@ h2 {
     font-weight: 500;
     color: #111;
     font-size: 0.95rem;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.unread-badge {
+    background: #d32f2f;
+    color: white;
+    font-size: 0.7rem;
+    font-weight: 600;
+    padding: 2px 6px;
+    border-radius: 10px;
+    min-width: 18px;
+    text-align: center;
 }
 
 .room-item .room-code {
@@ -317,6 +331,11 @@ h2 {
     justify-content: center;
     background: #f0f0f0;
     overflow: hidden;
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
 }
 
 .chat-container {
@@ -327,6 +346,7 @@ h2 {
     flex-direction: column;
     background: white;
     box-shadow: 0 0 20px rgba(0, 0, 0, 0.1);
+    overflow: hidden;
 }
 
 .chat-header {
@@ -336,6 +356,7 @@ h2 {
     padding: 16px 20px;
     background: #111;
     color: white;
+    flex-shrink: 0;
 }
 
 .header-center {
@@ -514,6 +535,23 @@ h2 {
     border-color: #111;
 }
 
+.setting-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+}
+
+.setting-description {
+    font-size: 0.9rem;
+    color: #666;
+}
+
+.notification-setting {
+    border-top: 1px solid #eee;
+    padding-top: 20px;
+    margin-top: 4px;
+}
+
 /* ルーム情報 */
 .info-row {
     display: flex;
@@ -534,6 +572,58 @@ h2 {
 .info-value {
     font-weight: 500;
     color: #111;
+}
+
+/* トグルスイッチ */
+.toggle-switch {
+    position: relative;
+    display: inline-block;
+    width: 50px;
+    height: 26px;
+}
+
+.toggle-switch input {
+    opacity: 0;
+    width: 0;
+    height: 0;
+}
+
+.toggle-slider {
+    position: absolute;
+    cursor: pointer;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background-color: #ccc;
+    transition: 0.3s;
+    border-radius: 26px;
+}
+
+.toggle-slider:before {
+    position: absolute;
+    content: "";
+    height: 20px;
+    width: 20px;
+    left: 3px;
+    bottom: 3px;
+    background-color: white;
+    transition: 0.3s;
+    border-radius: 50%;
+}
+
+.toggle-switch input:checked + .toggle-slider {
+    background-color: #4caf50;
+}
+
+.toggle-switch input:checked + .toggle-slider:before {
+    transform: translateX(24px);
+}
+
+.notification-row {
+    align-items: center;
+    margin-top: 8px;
+    padding-top: 16px;
 }
 
 .info-value.code {
@@ -577,10 +667,13 @@ h2 {
     flex: 1;
     padding: 20px;
     overflow-y: auto;
+    overflow-x: hidden;
     background: #fafafa;
     display: flex;
     flex-direction: column;
     gap: 12px;
+    -webkit-overflow-scrolling: touch;
+    overscroll-behavior: contain;
 }
 
 .message {
@@ -642,15 +735,16 @@ h2 {
 
 .chat-input {
     display: flex;
-    gap: 12px;
-    padding: 16px 20px;
+    gap: 10px;
+    padding: 12px 16px;
     background: white;
     border-top: 1px solid #e5e5e5;
+    flex-shrink: 0;
 }
 
 .chat-input input {
-    flex: 7;
-    padding: 12px 18px;
+    flex: 1;
+    padding: 10px 16px;
     border: 1px solid #ddd;
     border-radius: 24px;
     font-size: 0.95rem;
@@ -665,10 +759,11 @@ h2 {
 }
 
 .chat-input .btn {
-    flex: 3;
+    flex-shrink: 0;
+    width: 70px;
     border-radius: 24px;
     padding: 10px 0;
-    font-size: 0.9rem;
+    font-size: 0.85rem;
 }
 
 /* テーマ */

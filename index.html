@@ -170,6 +170,16 @@
                         <button class="font-btn" data-size="large">大</button>
                     </div>
                 </div>
+                <div class="setting-group notification-setting">
+                    <label>このグループの通知</label>
+                    <div class="setting-row">
+                        <span class="setting-description">新着メッセージを通知する</span>
+                        <label class="toggle-switch">
+                            <input type="checkbox" id="settings-notification-toggle">
+                            <span class="toggle-slider"></span>
+                        </label>
+                    </div>
+                </div>
             </div>
         </div>
     </div>
@@ -198,6 +208,13 @@
                     <span class="info-label">メンバー</span>
                     <span id="info-room-members" class="info-value"></span>
                 </div>
+                <div class="info-row notification-row">
+                    <span class="info-label">通知</span>
+                    <label class="toggle-switch">
+                        <input type="checkbox" id="notification-toggle">
+                        <span class="toggle-slider"></span>
+                    </label>
+                </div>
             </div>
         </div>
     </div>
@@ -216,7 +233,7 @@
     </div>
 
     <!-- バージョン表示 -->
-    <div class="version">v2.1.3</div>
+    <div class="version">v2.2.2</div>
 
     <!-- Firebase SDK -->
     <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-app-compat.js"></script>

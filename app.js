@@ -1,10 +1,11 @@
 // StudyBoard - グループ学習ノートアプリケーション
-// Firebase Authentication対応版 v2.3.1
+// Firebase Authentication対応版 v2.3.2
 
 // ========== 設定 ==========
-const SITE_PASSWORD = '1234567890'; // アクセスコード（10桁の数字）
+const SITE_PASSWORD = '8264108167'; // アクセスコード（10桁の数字）
 const EMAIL_DOMAIN = 'studyboard.local'; // Firebase Auth用メールドメイン
 const MAX_IMAGE_SIZE = 5 * 1024 * 1024; // 5MB
+const MAX_MESSAGES = 100; // グループあたりの最大メッセージ数
 
 // ========== Firebase初期化 ==========
 let db = null;
@@ -154,12 +155,35 @@ const Storage = {
             const groups = JSON.parse(localStorage.getItem('sb_groups') || '{}');
             if (groups[code]) {
                 groups[code].notes.push(note);
+                // 古いメッセージを削除
+                while (groups[code].notes.length > MAX_MESSAGES) {
+                    groups[code].notes.shift();
+                }
                 localStorage.setItem('sb_groups', JSON.stringify(groups));
             }
             return;
         }
         const notesRef = db.ref('groups/' + code + '/notes');
         await notesRef.push(note);
+        // 古いメッセージを削除
+        await this.trimOldNotes(code);
+    },
+    async trimOldNotes(code) {
+        if (!firebaseEnabled) return;
+        const notesRef = db.ref('groups/' + code + '/notes');
+        const snapshot = await notesRef.once('value');
+        const notes = snapshot.val();
+        if (!notes) return;
+        const keys = Object.keys(notes);
+        if (keys.length > MAX_MESSAGES) {
+            const deleteCount = keys.length - MAX_MESSAGES;
+            const keysToDelete = keys.slice(0, deleteCount);
+            const updates = {};
+            keysToDelete.forEach(key => {
+                updates[key] = null;
+            });
+            await notesRef.update(updates);
+        }
     }
 };
 

@@ -26,12 +26,16 @@ body {
     padding: 20px;
     overflow-y: auto;
     -webkit-overflow-scrolling: touch;
+    overscroll-behavior: contain;
 }
 
 .screen.active {
     display: flex;
-    justify-content: center;
+    flex-direction: column;
+    justify-content: flex-start;
     align-items: center;
+    padding-top: 40px;
+    padding-bottom: 40px;
 }
 
 .container {
@@ -799,7 +803,8 @@ body.theme-dark .chat-input input:focus {
 body.theme-dark h1,
 body.theme-dark h2,
 body.theme-dark .room-item .room-name,
-body.theme-dark .info-value {
+body.theme-dark .info-value,
+body.theme-dark .user-info span {
     color: #e0e0e0;
 }
 
@@ -899,6 +904,71 @@ body.theme-dark .font-btn.active {
     background: #e0e0e0;
     color: #1a1a1a;
     border-color: #e0e0e0;
+}
+
+body.theme-dark .setting-group label,
+body.theme-dark .setting-description {
+    color: #e0e0e0;
+}
+
+body.theme-dark .form-group label {
+    color: #e0e0e0;
+}
+
+body.theme-dark .form-group .hint {
+    color: #aaa;
+}
+
+body.theme-dark .subtitle {
+    color: #aaa;
+}
+
+body.theme-dark .code {
+    color: #e0e0e0;
+}
+
+body.theme-dark .code.small {
+    color: #aaa;
+}
+
+body.theme-dark .room-item .room-code {
+    color: #aaa;
+}
+
+body.theme-dark .info-label {
+    color: #aaa;
+}
+
+body.theme-dark .confirm-modal p {
+    color: #e0e0e0;
+}
+
+body.theme-dark .message.system {
+    background: #404040;
+    color: #ccc;
+}
+
+body.theme-dark .code-display {
+    background: #333;
+    border-color: #404040;
+}
+
+body.theme-dark .code-display p {
+    color: #aaa;
+}
+
+body.theme-dark .notification-setting {
+    border-color: #404040;
+}
+
+body.theme-dark .btn.small {
+    background: #404040;
+    color: #e0e0e0;
+    border-color: #555;
+}
+
+body.theme-dark .btn.small:hover {
+    background: #505050;
 }
 
 /* ブルーテーマ */

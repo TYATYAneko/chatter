@@ -1266,3 +1266,32 @@ body.theme-dark .load-more-btn:hover {
     background: #505050;
     color: #ddd;
 }
+
+/* ========== メッセージ内リンク ========== */
+.message .text a {
+    color: #1976d2;
+    text-decoration: underline;
+    word-break: break-all;
+}
+
+.message .text a:hover {
+    color: #1565c0;
+}
+
+.message.own .text a {
+    color: #fff;
+    text-decoration: underline;
+}
+
+.message.own .text a:hover {
+    color: #e3f2fd;
+}
+
+/* ダークテーマ対応 */
+body.theme-dark .message .text a {
+    color: #64b5f6;
+}
+
+body.theme-dark .message .text a:hover {
+    color: #90caf9;
+}

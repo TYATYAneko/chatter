@@ -1036,7 +1036,7 @@ function renderNotesWithLimit(notes, scrollToBottom = true) {
             <div class="message ${isOwn ? 'own' : 'other'}">
                 ${deleteBtn}
                 ${!isOwn ? `<div class="sender">${note.sender}</div>` : ''}
-                <div class="text">${escapeHtml(note.text)}</div>
+                <div class="text">${linkify(escapeHtml(note.text))}</div>
                 <div class="time">${formatTime(note.timestamp)}</div>
             </div>
         `;
@@ -1142,6 +1142,12 @@ function escapeHtml(text) {
     const div = document.createElement('div');
     div.textContent = text;
     return div.innerHTML;
+}
+
+function linkify(text) {
+    // URLを検出してリンクに変換
+    const urlPattern = /(https?:\/\/[^\s<]+)/g;
+    return text.replace(urlPattern, '<a href="$1" target="_blank" rel="noopener noreferrer">$1</a>');
 }
 
 // ========== 初期化 ==========

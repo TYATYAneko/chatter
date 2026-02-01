@@ -1,8 +1,7 @@
 // StudyBoard - グループ学習ノートアプリケーション
-// Firebase Authentication対応版 v2.3.2
+// Firebase Authentication対応版 v2.3.3
 
 // ========== 設定 ==========
-const SITE_PASSWORD = '8264108167'; // アクセスコード（10桁の数字）
 const EMAIL_DOMAIN = 'studyboard.local'; // Firebase Auth用メールドメイン
 const MAX_IMAGE_SIZE = 5 * 1024 * 1024; // 5MB
 const MAX_MESSAGES = 100; // グループあたりの最大メッセージ数
@@ -85,12 +84,6 @@ const Storage = {
     },
     clearCurrentUser() {
         sessionStorage.removeItem('sb_currentUser');
-    },
-    isEntryVerified() {
-        return sessionStorage.getItem('sb_entry') === 'verified';
-    },
-    setEntryVerified() {
-        sessionStorage.setItem('sb_entry', 'verified');
     },
 
     // Firebase操作 - ユーザーグループ
@@ -276,39 +269,6 @@ function getFirebaseErrorMessage(errorCode) {
 // ========== 画面管理 ==========
 let currentGroup = null;
 let groupListener = null;
-
-// エントリー画面
-function initEntryScreen() {
-    const entryBtn = document.getElementById('entry-btn');
-    const entryPassword = document.getElementById('entry-password');
-    const entryError = document.getElementById('entry-error');
-
-    entryBtn.addEventListener('click', () => {
-        const password = entryPassword.value;
-
-        if (password.length !== 10) {
-            entryError.textContent = 'コードは10桁の数字です';
-            return;
-        }
-
-        if (!/^\d+$/.test(password)) {
-            entryError.textContent = '数字のみ入力してください';
-            return;
-        }
-
-        if (password !== SITE_PASSWORD) {
-            entryError.textContent = 'コードが正しくありません';
-            return;
-        }
-
-        Storage.setEntryVerified();
-        checkAuthAndNavigate();
-    });
-
-    entryPassword.addEventListener('keypress', (e) => {
-        if (e.key === 'Enter') entryBtn.click();
-    });
-}
 
 // 認証画面
 function initAuthScreen() {
@@ -1188,11 +1148,6 @@ function escapeHtml(text) {
 
 // ========== 初期化 ==========
 function checkAuthAndNavigate() {
-    if (!Storage.isEntryVerified()) {
-        showScreen('entry-screen');
-        return;
-    }
-
     if (firebaseEnabled && auth.currentUser) {
         showLobby();
     } else if (!firebaseEnabled && Storage.getCurrentUser()) {
@@ -1206,7 +1161,7 @@ function checkAuthAndNavigate() {
 function setupAuthListener() {
     if (firebaseEnabled) {
         auth.onAuthStateChanged((user) => {
-            if (user && Storage.isEntryVerified()) {
+            if (user) {
                 showLobby();
             }
         });
@@ -1227,7 +1182,6 @@ window.addEventListener('storage', async (e) => {
 document.addEventListener('DOMContentLoaded', () => {
     firebaseEnabled = initFirebase();
     setupAuthListener();
-    initEntryScreen();
     initAuthScreen();
     initLobbyScreen();
     initChatScreen();

@@ -8,22 +8,8 @@
     <link rel="stylesheet" href="style.css">
 </head>
 <body>
-    <!-- サイトエントリーパスワード画面 -->
-    <div id="entry-screen" class="screen active">
-        <div class="container">
-            <h1>StudyBoard</h1>
-            <p class="subtitle">グループ学習ノートへようこそ</p>
-            <div class="form-group">
-                <label for="entry-password">アクセスコード（10桁の数字）</label>
-                <input type="password" id="entry-password" maxlength="10" pattern="[0-9]*" inputmode="numeric" placeholder="コードを入力">
-                <p id="entry-error" class="error"></p>
-            </div>
-            <button id="entry-btn" class="btn primary">開始</button>
-        </div>
-    </div>
-
     <!-- ログイン/登録画面 -->
-    <div id="auth-screen" class="screen">
+    <div id="auth-screen" class="screen active">
         <div class="container">
             <h1>StudyBoard</h1>
             <div class="tabs">
@@ -241,7 +227,7 @@
     </div>
 
     <!-- バージョン表示 -->
-    <div class="version">v2.3.2</div>
+    <div class="version">v2.3.3</div>
 
     <!-- Firebase SDK -->
     <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-app-compat.js"></script>

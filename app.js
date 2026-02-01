@@ -43,17 +43,30 @@ const Storage = {
         localStorage.setItem('sb_settings', JSON.stringify(settings));
     },
 
-    // 既読管理
-    getReadCounts() {
-        return JSON.parse(localStorage.getItem('sb_readCounts') || '{}');
+    // 既読管理（Firebase同期）
+    _readCountsCache: {},
+    async getReadCounts() {
+        if (!auth.currentUser) return {};
+        try {
+            const snapshot = await db.ref('userReadCounts/' + auth.currentUser.uid).once('value');
+            this._readCountsCache = snapshot.val() || {};
+            return this._readCountsCache;
+        } catch (error) {
+            console.error('既読データ取得エラー:', error);
+            return this._readCountsCache || {};
+        }
     },
-    setReadCount(groupCode, count) {
-        const readCounts = this.getReadCounts();
-        readCounts[groupCode] = count;
-        localStorage.setItem('sb_readCounts', JSON.stringify(readCounts));
+    async setReadCount(groupCode, count) {
+        if (!auth.currentUser) return;
+        this._readCountsCache[groupCode] = count;
+        try {
+            await db.ref('userReadCounts/' + auth.currentUser.uid + '/' + groupCode).set(count);
+        } catch (error) {
+            console.error('既読データ保存エラー:', error);
+        }
     },
-    getUnreadCount(groupCode, totalCount) {
-        const readCounts = this.getReadCounts();
+    async getUnreadCount(groupCode, totalCount) {
+        const readCounts = await this.getReadCounts();
         const lastRead = readCounts[groupCode] || 0;
         return Math.max(0, totalCount - lastRead);
     },
@@ -479,6 +492,7 @@ async function updateMyGroups() {
     try {
         const userGroups = await Storage.getUserGroups(currentUser.uid);
         const groups = await Storage.getGroups();
+        const readCounts = await Storage.getReadCounts();
 
         if (!userGroups || userGroups.length === 0) {
             container.innerHTML = '<p style="color: #888; text-align: center;">参加中のグループはありません</p>';
@@ -490,7 +504,8 @@ async function updateMyGroups() {
             .map(code => {
                 const group = groups[code];
                 const noteCount = group.notes ? (Array.isArray(group.notes) ? group.notes.length : Object.keys(group.notes).length) : 0;
-                const unreadCount = Storage.getUnreadCount(code, noteCount);
+                const lastRead = readCounts[code] || 0;
+                const unreadCount = Math.max(0, noteCount - lastRead);
                 const unreadBadge = unreadCount > 0
                     ? `<span class="unread-badge">${unreadCount > 99 ? '99+' : unreadCount}</span>`
                     : '';
@@ -840,7 +855,8 @@ async function enterGroup(code) {
     document.getElementById('room-code-info').textContent = group.code;
 
     const noteCount = group.notes ? (Array.isArray(group.notes) ? group.notes.length : Object.keys(group.notes).length) : 0;
-    Storage.setReadCount(code, noteCount);
+    currentReadCount = noteCount; // 総メッセージ数を既読として記録
+    await Storage.setReadCount(code, noteCount);
 
     // グローバル変数をリセット
     allNotesCache = [];
@@ -854,44 +870,62 @@ async function enterGroup(code) {
 }
 
 let lastNoteCount = 0;
+let oldestLoadedKey = null; // 読み込んだ最古のメッセージのキー
+let hasMoreOldMessages = true; // 古いメッセージがまだあるか
+let currentReadCount = 0; // 現在の既読数（減らさないように管理）
 
-function startGroupListener(code) {
+function startGroupListener(code, preserveCache = false) {
     stopGroupListener();
     lastNoteCount = 0;
-    allNotesCache = [];
-    displayedMessagesCount = INITIAL_MESSAGES_LIMIT;
+
+    // preserveCache=trueの場合はキャッシュを保持（タブ再アクティブ時）
+    if (!preserveCache) {
+        allNotesCache = [];
+        displayedMessagesCount = INITIAL_MESSAGES_LIMIT;
+        oldestLoadedKey = null;
+        hasMoreOldMessages = true;
+    }
 
     let isFirstLoad = true;
-    groupListener = db.ref('groups/' + code + '/notes').on('value', async (snapshot) => {
-        const notes = snapshot.val();
-        if (notes) {
-            // キーを保持したまま配列に変換
-            const notesArray = Object.entries(notes).map(([key, note]) => ({ ...note, _key: key }));
-            allNotesCache = notesArray;
+    // 最新のINITIAL_MESSAGES_LIMIT件のみを取得（転送量節約）
+    groupListener = db.ref('groups/' + code + '/notes')
+        .limitToLast(INITIAL_MESSAGES_LIMIT)
+        .on('value', async (snapshot) => {
+            const notes = snapshot.val();
+            if (notes) {
+                // キーを保持したまま配列に変換
+                const notesArray = Object.entries(notes).map(([key, note]) => ({ ...note, _key: key }));
 
-            // 初回読み込み時は最新の20件のみ表示
-            if (isFirstLoad) {
-                displayedMessagesCount = INITIAL_MESSAGES_LIMIT;
-            } else {
-                // 新しいメッセージが追加された場合は表示数を増やす
-                const newMessagesCount = notesArray.length - lastNoteCount;
-                if (newMessagesCount > 0) {
-                    displayedMessagesCount += newMessagesCount;
+                // 最古のキーを記録
+                if (notesArray.length > 0) {
+                    oldestLoadedKey = notesArray[0]._key;
                 }
+
+                // 既存の古いメッセージと新しいメッセージをマージ
+                if (isFirstLoad) {
+                    allNotesCache = notesArray;
+                } else {
+                    // リスナーから取得した最新メッセージで更新
+                    // 古いメッセージ（loadMoreで取得したもの）は保持
+                    const oldMessages = allNotesCache.filter(note =>
+                        !notesArray.some(n => n._key === note._key)
+                    );
+                    allNotesCache = [...oldMessages, ...notesArray];
+                }
+
+                renderNotes(allNotesCache);
+
+                if (!isFirstLoad && notesArray.length > lastNoteCount) {
+                    const newNotes = notesArray.slice(lastNoteCount);
+                    await sendNotifications(code, newNotes);
+                    // 新しいメッセージが来た分だけ既読数を増やす
+                    currentReadCount += newNotes.length;
+                    await Storage.setReadCount(code, currentReadCount);
+                }
+                lastNoteCount = notesArray.length;
+                isFirstLoad = false;
             }
-
-            renderNotesWithLimit(notesArray, displayedMessagesCount, isFirstLoad);
-
-            if (!isFirstLoad && notesArray.length > lastNoteCount) {
-                const newNotes = notesArray.slice(lastNoteCount);
-                await sendNotifications(code, newNotes);
-            }
-            lastNoteCount = notesArray.length;
-            isFirstLoad = false;
-
-            Storage.setReadCount(code, notesArray.length);
-        }
-    });
+        });
 }
 
 async function sendNotifications(groupCode, newNotes) {
@@ -958,7 +992,7 @@ async function deleteNote(noteKey) {
     }
 }
 
-function renderNotesWithLimit(notes, limit, scrollToBottom = true) {
+function renderNotesWithLimit(notes, scrollToBottom = true) {
     const container = document.getElementById('messages');
     const currentUser = Storage.getCurrentUser();
 
@@ -966,15 +1000,13 @@ function renderNotesWithLimit(notes, limit, scrollToBottom = true) {
         notes = [];
     }
 
-    // 最新のメッセージをlimit件取得（古いメッセージから順に表示）
-    const startIndex = Math.max(0, notes.length - limit);
-    const displayNotes = notes.slice(startIndex);
-    const hasMoreMessages = startIndex > 0;
+    // 全メッセージを表示（キャッシュにあるもの全て）
+    const displayNotes = notes;
 
-    // 「もっと読み込む」ボタン
-    const loadMoreBtn = hasMoreMessages
+    // 「もっと読み込む」ボタン（まだ古いメッセージがある場合のみ表示）
+    const loadMoreBtn = hasMoreOldMessages
         ? `<div class="load-more-container">
-            <button class="load-more-btn" onclick="loadMoreMessages()">古いメッセージを読み込む (${startIndex}件)</button>
+            <button class="load-more-btn" onclick="loadMoreMessages()">古いメッセージを読み込む</button>
            </div>`
         : '';
 
@@ -1026,21 +1058,64 @@ function renderNotesWithLimit(notes, limit, scrollToBottom = true) {
     }
 }
 
-function loadMoreMessages() {
-    displayedMessagesCount += INITIAL_MESSAGES_LIMIT;
-    const container = document.getElementById('messages');
-    const previousScrollHeight = container.scrollHeight;
+async function loadMoreMessages() {
+    if (!currentGroup || !oldestLoadedKey || !hasMoreOldMessages) return;
 
-    renderNotesWithLimit(allNotesCache, displayedMessagesCount, false);
+    const loadMoreBtn = document.querySelector('.load-more-btn');
+    if (loadMoreBtn) {
+        loadMoreBtn.textContent = '読み込み中...';
+        loadMoreBtn.disabled = true;
+    }
 
-    // スクロール位置を維持（古いメッセージが上に追加されるため）
-    const newScrollHeight = container.scrollHeight;
-    container.scrollTop = newScrollHeight - previousScrollHeight;
+    try {
+        // 現在の最古のメッセージより前のメッセージを取得
+        const snapshot = await db.ref('groups/' + currentGroup + '/notes')
+            .orderByKey()
+            .endBefore(oldestLoadedKey)
+            .limitToLast(INITIAL_MESSAGES_LIMIT)
+            .once('value');
+
+        const notes = snapshot.val();
+        if (notes) {
+            const notesArray = Object.entries(notes).map(([key, note]) => ({ ...note, _key: key }));
+
+            if (notesArray.length > 0) {
+                // 新しい最古のキーを更新
+                oldestLoadedKey = notesArray[0]._key;
+
+                // 古いメッセージをキャッシュの先頭に追加
+                allNotesCache = [...notesArray, ...allNotesCache];
+
+                const container = document.getElementById('messages');
+                const previousScrollHeight = container.scrollHeight;
+
+                renderNotes(allNotesCache);
+
+                // スクロール位置を維持
+                const newScrollHeight = container.scrollHeight;
+                container.scrollTop = newScrollHeight - previousScrollHeight;
+            }
+
+            // 取得した件数が制限より少なければ、これ以上古いメッセージはない
+            if (notesArray.length < INITIAL_MESSAGES_LIMIT) {
+                hasMoreOldMessages = false;
+            }
+        } else {
+            hasMoreOldMessages = false;
+        }
+
+        // ボタンを再描画するために再レンダリング
+        renderNotes(allNotesCache);
+    } catch (error) {
+        console.error('古いメッセージの読み込みエラー:', error);
+        if (loadMoreBtn) {
+            loadMoreBtn.textContent = '読み込みに失敗しました';
+        }
+    }
 }
 
-// 後方互換性のための renderNotes（使われなくなるが念のため）
 function renderNotes(notes) {
-    renderNotesWithLimit(notes, notes ? notes.length : 0);
+    renderNotesWithLimit(notes, true);
 }
 
 function openImageModal(src) {
@@ -1086,12 +1161,28 @@ function setupAuthListener() {
     });
 }
 
+// タブの表示状態に応じて接続を管理（接続数節約）
+function setupVisibilityListener() {
+    document.addEventListener('visibilitychange', () => {
+        if (!currentGroup) return;
+
+        if (document.visibilityState === 'hidden') {
+            // タブが非アクティブになったら接続を解除
+            stopGroupListener();
+        } else if (document.visibilityState === 'visible') {
+            // タブがアクティブになったら再接続（キャッシュは保持）
+            startGroupListener(currentGroup, true);
+        }
+    });
+}
+
 // 初期化
 document.addEventListener('DOMContentLoaded', () => {
     if (!initFirebase()) {
         return;
     }
     setupAuthListener();
+    setupVisibilityListener();
     initAuthScreen();
     initLobbyScreen();
     initChatScreen();

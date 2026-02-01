@@ -6,6 +6,7 @@ const EMAIL_DOMAIN = 'studyboard.local'; // Firebase Auth用メールドメイ�
 const MAX_IMAGE_SIZE = 5 * 1024 * 1024; // 5MB
 const MAX_MESSAGES = 100; // グループあたりの最大メッセージ数
 const MAX_TEXT_LENGTH = 500; // メッセージの最大文字数
+const INITIAL_MESSAGES_LIMIT = 20; // 初回表示するメッセージ数
 
 // ========== Firebase初期化 ==========
 let db = null;
@@ -214,6 +215,8 @@ function getFirebaseErrorMessage(errorCode) {
 // ========== 画面管理 ==========
 let currentGroup = null;
 let groupListener = null;
+let allNotesCache = []; // 全メッセージのキャッシュ
+let displayedMessagesCount = 0; // 現在表示中のメッセージ数
 
 // 認証画面
 function initAuthScreen() {
@@ -839,8 +842,13 @@ async function enterGroup(code) {
     const noteCount = group.notes ? (Array.isArray(group.notes) ? group.notes.length : Object.keys(group.notes).length) : 0;
     Storage.setReadCount(code, noteCount);
 
+    // グローバル変数をリセット
+    allNotesCache = [];
+    displayedMessagesCount = INITIAL_MESSAGES_LIMIT;
+
     showScreen('chat-screen');
-    renderNotes(group.notes);
+    // 初回表示は空にして、startGroupListenerで表示
+    document.getElementById('messages').innerHTML = '';
 
     startGroupListener(code);
 }
@@ -850,6 +858,8 @@ let lastNoteCount = 0;
 function startGroupListener(code) {
     stopGroupListener();
     lastNoteCount = 0;
+    allNotesCache = [];
+    displayedMessagesCount = INITIAL_MESSAGES_LIMIT;
 
     let isFirstLoad = true;
     groupListener = db.ref('groups/' + code + '/notes').on('value', async (snapshot) => {
@@ -857,7 +867,20 @@ function startGroupListener(code) {
         if (notes) {
             // キーを保持したまま配列に変換
             const notesArray = Object.entries(notes).map(([key, note]) => ({ ...note, _key: key }));
-            renderNotes(notesArray);
+            allNotesCache = notesArray;
+
+            // 初回読み込み時は最新の20件のみ表示
+            if (isFirstLoad) {
+                displayedMessagesCount = INITIAL_MESSAGES_LIMIT;
+            } else {
+                // 新しいメッセージが追加された場合は表示数を増やす
+                const newMessagesCount = notesArray.length - lastNoteCount;
+                if (newMessagesCount > 0) {
+                    displayedMessagesCount += newMessagesCount;
+                }
+            }
+
+            renderNotesWithLimit(notesArray, displayedMessagesCount, isFirstLoad);
 
             if (!isFirstLoad && notesArray.length > lastNoteCount) {
                 const newNotes = notesArray.slice(lastNoteCount);
@@ -935,7 +958,7 @@ async function deleteNote(noteKey) {
     }
 }
 
-function renderNotes(notes) {
+function renderNotesWithLimit(notes, limit, scrollToBottom = true) {
     const container = document.getElementById('messages');
     const currentUser = Storage.getCurrentUser();
 
@@ -943,7 +966,19 @@ function renderNotes(notes) {
         notes = [];
     }
 
-    container.innerHTML = notes.map(note => {
+    // 最新のメッセージをlimit件取得（古いメッセージから順に表示）
+    const startIndex = Math.max(0, notes.length - limit);
+    const displayNotes = notes.slice(startIndex);
+    const hasMoreMessages = startIndex > 0;
+
+    // 「もっと読み込む」ボタン
+    const loadMoreBtn = hasMoreMessages
+        ? `<div class="load-more-container">
+            <button class="load-more-btn" onclick="loadMoreMessages()">古いメッセージを読み込む (${startIndex}件)</button>
+           </div>`
+        : '';
+
+    container.innerHTML = loadMoreBtn + displayNotes.map(note => {
         if (note.type === 'system') {
             return `<div class="message system">${note.text}</div>`;
         }
@@ -975,18 +1010,37 @@ function renderNotes(notes) {
         `;
     }).join('');
 
-    // 即座にスクロール
-    container.scrollTop = container.scrollHeight;
+    if (scrollToBottom) {
+        // 即座にスクロール
+        container.scrollTop = container.scrollHeight;
 
-    // 画像読み込み後に再度スクロール
-    const images = container.querySelectorAll('img');
-    images.forEach(img => {
-        if (!img.complete) {
-            img.addEventListener('load', () => {
-                container.scrollTop = container.scrollHeight;
-            }, { once: true });
-        }
-    });
+        // 画像読み込み後に再度スクロール
+        const images = container.querySelectorAll('img');
+        images.forEach(img => {
+            if (!img.complete) {
+                img.addEventListener('load', () => {
+                    container.scrollTop = container.scrollHeight;
+                }, { once: true });
+            }
+        });
+    }
+}
+
+function loadMoreMessages() {
+    displayedMessagesCount += INITIAL_MESSAGES_LIMIT;
+    const container = document.getElementById('messages');
+    const previousScrollHeight = container.scrollHeight;
+
+    renderNotesWithLimit(allNotesCache, displayedMessagesCount, false);
+
+    // スクロール位置を維持（古いメッセージが上に追加されるため）
+    const newScrollHeight = container.scrollHeight;
+    container.scrollTop = newScrollHeight - previousScrollHeight;
+}
+
+// 後方互換性のための renderNotes（使われなくなるが念のため）
+function renderNotes(notes) {
+    renderNotesWithLimit(notes, notes ? notes.length : 0);
 }
 
 function openImageModal(src) {
@@ -1007,6 +1061,7 @@ function openImageModal(src) {
 }
 
 window.openImageModal = openImageModal;
+window.loadMoreMessages = loadMoreMessages;
 
 function escapeHtml(text) {
     const div = document.createElement('div');

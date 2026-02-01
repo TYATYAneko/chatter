@@ -1,30 +1,33 @@
 // StudyBoard - グループ学習ノートアプリケーション
-// Firebase Authentication対応版 v2.3.7
+// Firebase専用版 v2.5.0
 
 // ========== 設定 ==========
 const EMAIL_DOMAIN = 'studyboard.local'; // Firebase Auth用メールドメイン
 const MAX_IMAGE_SIZE = 5 * 1024 * 1024; // 5MB
 const MAX_MESSAGES = 100; // グループあたりの最大メッセージ数
+const MAX_TEXT_LENGTH = 500; // メッセージの最大文字数
 
 // ========== Firebase初期化 ==========
 let db = null;
 let auth = null;
-let firebaseEnabled = false;
 
 function initFirebase() {
+    if (typeof firebaseConfig === 'undefined' || typeof firebase === 'undefined') {
+        alert('Firebase設定が見つかりません。index.htmlのfirebaseConfigを確認してください。');
+        return false;
+    }
+    if (!firebaseConfig.apiKey || firebaseConfig.apiKey === "YOUR_API_KEY") {
+        alert('Firebase APIキーが設定されていません。');
+        return false;
+    }
     try {
-        if (typeof firebaseConfig === 'undefined' || typeof firebase === 'undefined') {
-            return false;
-        }
-        if (!firebaseConfig.apiKey || firebaseConfig.apiKey === "YOUR_API_KEY") {
-            return false;
-        }
         firebase.initializeApp(firebaseConfig);
         db = firebase.database();
         auth = firebase.auth();
         return true;
     } catch (error) {
         console.error('Firebase初期化エラー:', error);
+        alert('Firebaseの初期化に失敗しました。');
         return false;
     }
 }
@@ -68,101 +71,45 @@ const Storage = {
         localStorage.setItem('sb_notifications', JSON.stringify(settings));
     },
 
-    // セッション管理（ローカルモード用）
+    // 現在のユーザー
     getCurrentUser() {
-        if (firebaseEnabled && auth.currentUser) {
+        if (auth.currentUser) {
             return {
                 name: auth.currentUser.displayName || auth.currentUser.email.split('@')[0],
                 uid: auth.currentUser.uid,
                 email: auth.currentUser.email
             };
         }
-        return JSON.parse(sessionStorage.getItem('sb_currentUser') || 'null');
-    },
-    setCurrentUser(user) {
-        sessionStorage.setItem('sb_currentUser', JSON.stringify(user));
-    },
-    clearCurrentUser() {
-        sessionStorage.removeItem('sb_currentUser');
+        return null;
     },
 
     // Firebase操作 - ユーザーグループ
     async getUserGroups(uid) {
-        if (!firebaseEnabled) {
-            const users = JSON.parse(localStorage.getItem('sb_users') || '{}');
-            const user = Object.values(users).find(u => u.name === uid) || {};
-            return user.groups || [];
-        }
         const snapshot = await db.ref('userGroups/' + uid).once('value');
         return snapshot.val() || [];
     },
     async saveUserGroups(uid, groups) {
-        if (!firebaseEnabled) {
-            const users = JSON.parse(localStorage.getItem('sb_users') || '{}');
-            if (!users[uid]) users[uid] = { name: uid };
-            users[uid].groups = groups;
-            localStorage.setItem('sb_users', JSON.stringify(users));
-            return;
-        }
         await db.ref('userGroups/' + uid).set(groups);
-    },
-
-    // ローカルモード用ユーザー管理
-    async getLocalUser(name) {
-        const users = JSON.parse(localStorage.getItem('sb_users') || '{}');
-        return users[name] || null;
-    },
-    async saveLocalUser(name, userData) {
-        const users = JSON.parse(localStorage.getItem('sb_users') || '{}');
-        users[name] = userData;
-        localStorage.setItem('sb_users', JSON.stringify(users));
     },
 
     // Firebase操作 - グループ
     async getGroups() {
-        if (!firebaseEnabled) {
-            return JSON.parse(localStorage.getItem('sb_groups') || '{}');
-        }
         const snapshot = await db.ref('groups').once('value');
         return snapshot.val() || {};
     },
     async saveGroup(code, groupData) {
-        if (!firebaseEnabled) {
-            const groups = JSON.parse(localStorage.getItem('sb_groups') || '{}');
-            groups[code] = groupData;
-            localStorage.setItem('sb_groups', JSON.stringify(groups));
-            return;
-        }
         await db.ref('groups/' + code).set(groupData);
     },
     async getGroup(code) {
-        if (!firebaseEnabled) {
-            const groups = JSON.parse(localStorage.getItem('sb_groups') || '{}');
-            return groups[code] || null;
-        }
         const snapshot = await db.ref('groups/' + code).once('value');
         return snapshot.val();
     },
     async addNote(code, note) {
-        if (!firebaseEnabled) {
-            const groups = JSON.parse(localStorage.getItem('sb_groups') || '{}');
-            if (groups[code]) {
-                groups[code].notes.push(note);
-                // 古いメッセージを削除
-                while (groups[code].notes.length > MAX_MESSAGES) {
-                    groups[code].notes.shift();
-                }
-                localStorage.setItem('sb_groups', JSON.stringify(groups));
-            }
-            return;
-        }
         const notesRef = db.ref('groups/' + code + '/notes');
         await notesRef.push(note);
-        // 古いメッセージを削除
         await this.trimOldNotes(code);
     },
     async trimOldNotes(code) {
-        if (!firebaseEnabled) return;
         const notesRef = db.ref('groups/' + code + '/notes');
         const snapshot = await notesRef.once('value');
         const notes = snapshot.val();
@@ -182,7 +129,6 @@ const Storage = {
 
 // ========== 通知システム ==========
 const Notification = {
-    // 通知権限をリクエスト
     async requestPermission() {
         if (!('Notification' in window)) {
             console.log('このブラウザは通知をサポートしていません');
@@ -198,7 +144,6 @@ const Notification = {
         return false;
     },
 
-    // 通知を送信
     async send(title, body, groupCode) {
         if (!('Notification' in window)) return;
         if (window.Notification.permission !== 'granted') return;
@@ -301,31 +246,13 @@ function initAuthScreen() {
         showLoading(true);
         loginError.textContent = '';
 
-        if (firebaseEnabled) {
-            // Firebase Authentication
-            const email = `${name}@${EMAIL_DOMAIN}`;
-            try {
-                await auth.signInWithEmailAndPassword(email, password);
-                showLobby();
-            } catch (error) {
-                loginError.textContent = getFirebaseErrorMessage(error.code);
-                console.error(error);
-            }
-        } else {
-            // ローカルモード
-            try {
-                const user = await Storage.getLocalUser(name);
-                if (!user || user.password !== password) {
-                    loginError.textContent = 'ニックネームまたはパスワードが正しくありません';
-                    showLoading(false);
-                    return;
-                }
-                Storage.setCurrentUser({ name });
-                showLobby();
-            } catch (error) {
-                loginError.textContent = '接続エラーが発生しました';
-                console.error(error);
-            }
+        const email = `${name}@${EMAIL_DOMAIN}`;
+        try {
+            await auth.signInWithEmailAndPassword(email, password);
+            showLobby();
+        } catch (error) {
+            loginError.textContent = getFirebaseErrorMessage(error.code);
+            console.error(error);
         }
         showLoading(false);
     });
@@ -347,11 +274,8 @@ function initAuthScreen() {
             return;
         }
 
-        if (firebaseEnabled && password.length < 6) {
+        if (password.length < 6) {
             registerError.textContent = 'パスワードは6文字以上で入力してください';
-            return;
-        } else if (!firebaseEnabled && password.length < 4) {
-            registerError.textContent = 'パスワードは4文字以上で入力してください';
             return;
         }
 
@@ -363,34 +287,15 @@ function initAuthScreen() {
         showLoading(true);
         registerError.textContent = '';
 
-        if (firebaseEnabled) {
-            // Firebase Authentication
-            const email = `${name}@${EMAIL_DOMAIN}`;
-            try {
-                const userCredential = await auth.createUserWithEmailAndPassword(email, password);
-                await userCredential.user.updateProfile({ displayName: name });
-                await Storage.saveUserGroups(userCredential.user.uid, []);
-                showLobby();
-            } catch (error) {
-                registerError.textContent = getFirebaseErrorMessage(error.code);
-                console.error(error);
-            }
-        } else {
-            // ローカルモード
-            try {
-                const existingUser = await Storage.getLocalUser(name);
-                if (existingUser) {
-                    registerError.textContent = 'このニックネームは既に使用されています';
-                    showLoading(false);
-                    return;
-                }
-                await Storage.saveLocalUser(name, { name, password, groups: [] });
-                Storage.setCurrentUser({ name });
-                showLobby();
-            } catch (error) {
-                registerError.textContent = '接続エラーが発生しました';
-                console.error(error);
-            }
+        const email = `${name}@${EMAIL_DOMAIN}`;
+        try {
+            const userCredential = await auth.createUserWithEmailAndPassword(email, password);
+            await userCredential.user.updateProfile({ displayName: name });
+            await Storage.saveUserGroups(userCredential.user.uid, []);
+            showLobby();
+        } catch (error) {
+            registerError.textContent = getFirebaseErrorMessage(error.code);
+            console.error(error);
         }
         showLoading(false);
     });
@@ -419,10 +324,7 @@ function initLobbyScreen() {
     const joinCode = document.getElementById('join-code');
 
     logoutBtn.addEventListener('click', async () => {
-        if (firebaseEnabled) {
-            await auth.signOut();
-        }
-        Storage.clearCurrentUser();
+        await auth.signOut();
         showScreen('auth-screen');
     });
 
@@ -475,13 +377,11 @@ function initLobbyScreen() {
             };
             await Storage.saveGroup(code, newGroup);
 
-            // ユーザーのグループリストに追加
-            const uid = firebaseEnabled ? currentUser.uid : currentUser.name;
-            const userGroups = await Storage.getUserGroups(uid);
+            const userGroups = await Storage.getUserGroups(currentUser.uid);
             if (!userGroups.includes(code)) {
                 userGroups.push(code);
             }
-            await Storage.saveUserGroups(uid, userGroups);
+            await Storage.saveUserGroups(currentUser.uid, userGroups);
 
             document.getElementById('generated-code').textContent = code;
             document.getElementById('room-code-display').classList.remove('hidden');
@@ -536,24 +436,15 @@ function initLobbyScreen() {
                     sender: currentUser.name
                 };
 
-                if (firebaseEnabled) {
-                    // Firebaseの場合は個別に更新
-                    await db.ref('groups/' + code + '/members').set(group.members);
-                    await db.ref('groups/' + code + '/notes').push(joinNote);
-                } else {
-                    // ローカルの場合はグループに追加して保存
-                    if (!group.notes) group.notes = [];
-                    group.notes.push(joinNote);
-                    await Storage.saveGroup(code, group);
-                }
+                await db.ref('groups/' + code + '/members').set(group.members);
+                await db.ref('groups/' + code + '/notes').push(joinNote);
             }
 
-            const uid = firebaseEnabled ? currentUser.uid : currentUser.name;
-            const userGroups = await Storage.getUserGroups(uid);
+            const userGroups = await Storage.getUserGroups(currentUser.uid);
             if (!userGroups.includes(code)) {
                 userGroups.push(code);
             }
-            await Storage.saveUserGroups(uid, userGroups);
+            await Storage.saveUserGroups(currentUser.uid, userGroups);
 
             joinCode.value = '';
             joinError.textContent = '';
@@ -583,8 +474,7 @@ async function updateMyGroups() {
     const currentUser = Storage.getCurrentUser();
 
     try {
-        const uid = firebaseEnabled ? currentUser.uid : currentUser.name;
-        const userGroups = await Storage.getUserGroups(uid);
+        const userGroups = await Storage.getUserGroups(currentUser.uid);
         const groups = await Storage.getGroups();
 
         if (!userGroups || userGroups.length === 0) {
@@ -696,14 +586,12 @@ async function sendImage(file) {
     const currentUser = Storage.getCurrentUser();
     const timestamp = Date.now();
 
-    // アップロード中の表示
     const sendBtn = document.getElementById('send-btn');
     const imageBtn = document.querySelector('.image-upload-btn');
     sendBtn.disabled = true;
     imageBtn.classList.add('uploading');
 
     try {
-        // Base64に変換してRealtime Databaseに保存
         const imageUrl = await fileToBase64(file);
 
         const note = {
@@ -713,16 +601,7 @@ async function sendImage(file) {
             timestamp: timestamp
         };
 
-        if (firebaseEnabled) {
-            await Storage.addNote(currentGroup, note);
-        } else {
-            const group = await Storage.getGroup(currentGroup);
-            if (group) {
-                group.notes.push(note);
-                await Storage.saveGroup(currentGroup, group);
-                renderNotes(group.notes);
-            }
-        }
+        await Storage.addNote(currentGroup, note);
     } catch (error) {
         console.error('画像送信エラー:', error);
         alert('画像の送信に失敗しました');
@@ -751,33 +630,30 @@ async function doLeaveGroup() {
 
     try {
         const group = await Storage.getGroup(currentGroup);
-        const uid = firebaseEnabled ? currentUser.uid : currentUser.name;
-        const userGroups = await Storage.getUserGroups(uid);
+        const userGroups = await Storage.getUserGroups(currentUser.uid);
 
         if (group) {
             group.members = group.members.filter(name => name !== currentUser.name);
-            const leaveNote = {
-                type: 'system',
-                text: `${currentUser.name}さんが退出しました`,
-                timestamp: Date.now(),
-                sender: currentUser.name
-            };
 
-            if (firebaseEnabled) {
-                // Firebaseの場合は個別に更新
+            if (group.members.length === 0) {
+                // メンバーがいなくなったらグループを削除
+                await db.ref('groups/' + currentGroup).remove();
+            } else {
+                // まだメンバーがいる場合は通常の退出処理
+                const leaveNote = {
+                    type: 'system',
+                    text: `${currentUser.name}さんが退出しました`,
+                    timestamp: Date.now(),
+                    sender: currentUser.name
+                };
                 await db.ref('groups/' + currentGroup + '/members').set(group.members);
                 await db.ref('groups/' + currentGroup + '/notes').push(leaveNote);
-            } else {
-                // ローカルの場合はグループに追加して保存
-                if (!group.notes) group.notes = [];
-                group.notes.push(leaveNote);
-                await Storage.saveGroup(currentGroup, group);
             }
         }
 
         if (userGroups) {
             const newGroups = userGroups.filter(code => code !== currentGroup);
-            await Storage.saveUserGroups(uid, newGroups);
+            await Storage.saveUserGroups(currentUser.uid, newGroups);
         }
 
         stopGroupListener();
@@ -833,7 +709,6 @@ async function showGroupInfo() {
         document.getElementById('info-room-creator').textContent = group.creator;
         document.getElementById('info-room-members').textContent = group.members.join(', ');
 
-        // 通知設定を反映
         const notificationToggle = document.getElementById('notification-toggle');
         notificationToggle.checked = Storage.isNotificationEnabled(currentGroup);
 
@@ -853,7 +728,6 @@ function showSettings() {
         btn.classList.toggle('active', btn.dataset.size === settings.fontSize);
     });
 
-    // 通知設定を反映
     const settingsNotificationToggle = document.getElementById('settings-notification-toggle');
     settingsNotificationToggle.checked = Storage.isNotificationEnabled(currentGroup);
 
@@ -912,7 +786,6 @@ function initSettings() {
         });
     });
 
-    // 通知トグル（グループ情報モーダル）
     const notificationToggle = document.getElementById('notification-toggle');
     notificationToggle.addEventListener('change', async () => {
         if (notificationToggle.checked) {
@@ -926,7 +799,6 @@ function initSettings() {
         Storage.setNotificationEnabled(currentGroup, notificationToggle.checked);
     });
 
-    // 通知トグル（設定モーダル）
     const settingsNotificationToggle = document.getElementById('settings-notification-toggle');
     settingsNotificationToggle.addEventListener('change', async () => {
         if (settingsNotificationToggle.checked) {
@@ -964,7 +836,6 @@ async function enterGroup(code) {
     document.getElementById('room-title').textContent = group.name;
     document.getElementById('room-code-info').textContent = group.code;
 
-    // 既読にする
     const noteCount = group.notes ? (Array.isArray(group.notes) ? group.notes.length : Object.keys(group.notes).length) : 0;
     Storage.setReadCount(code, noteCount);
 
@@ -980,45 +851,24 @@ function startGroupListener(code) {
     stopGroupListener();
     lastNoteCount = 0;
 
-    if (firebaseEnabled) {
-        let isFirstLoad = true;
-        groupListener = db.ref('groups/' + code + '/notes').on('value', async (snapshot) => {
-            const notes = snapshot.val();
-            if (notes) {
-                const notesArray = Object.values(notes);
-                renderNotes(notesArray);
+    let isFirstLoad = true;
+    groupListener = db.ref('groups/' + code + '/notes').on('value', async (snapshot) => {
+        const notes = snapshot.val();
+        if (notes) {
+            // キーを保持したまま配列に変換
+            const notesArray = Object.entries(notes).map(([key, note]) => ({ ...note, _key: key }));
+            renderNotes(notesArray);
 
-                // 新着メッセージの通知（初回ロード以外）
-                if (!isFirstLoad && notesArray.length > lastNoteCount) {
-                    const newNotes = notesArray.slice(lastNoteCount);
-                    await sendNotifications(code, newNotes);
-                }
-                lastNoteCount = notesArray.length;
-                isFirstLoad = false;
-
-                // 既読を更新
-                Storage.setReadCount(code, notesArray.length);
+            if (!isFirstLoad && notesArray.length > lastNoteCount) {
+                const newNotes = notesArray.slice(lastNoteCount);
+                await sendNotifications(code, newNotes);
             }
-        });
-    } else {
-        groupListener = setInterval(async () => {
-            const group = await Storage.getGroup(currentGroup);
-            if (group) {
-                const noteCount = group.notes ? group.notes.length : 0;
+            lastNoteCount = notesArray.length;
+            isFirstLoad = false;
 
-                // 新着メッセージの通知
-                if (noteCount > lastNoteCount && lastNoteCount > 0) {
-                    const newNotes = group.notes.slice(lastNoteCount);
-                    await sendNotifications(currentGroup, newNotes);
-                }
-                lastNoteCount = noteCount;
-
-                renderNotes(group.notes);
-                // 既読を更新
-                Storage.setReadCount(currentGroup, noteCount);
-            }
-        }, 1000);
-    }
+            Storage.setReadCount(code, notesArray.length);
+        }
+    });
 }
 
 async function sendNotifications(groupCode, newNotes) {
@@ -1029,9 +879,7 @@ async function sendNotifications(groupCode, newNotes) {
     const groupName = group ? group.name : 'グループ';
 
     for (const note of newNotes) {
-        // 自分のメッセージは通知しない
         if (note.sender === currentUser.name) continue;
-        // システムメッセージも通知
         const title = `${groupName}`;
         const body = note.type === 'system' ? note.text : `${note.sender}: ${note.text}`;
         await Notification.send(title, body, groupCode);
@@ -1040,11 +888,7 @@ async function sendNotifications(groupCode, newNotes) {
 
 function stopGroupListener() {
     if (groupListener) {
-        if (firebaseEnabled) {
-            db.ref('groups/' + currentGroup + '/notes').off('value', groupListener);
-        } else {
-            clearInterval(groupListener);
-        }
+        db.ref('groups/' + currentGroup + '/notes').off('value', groupListener);
         groupListener = null;
     }
 }
@@ -1054,6 +898,11 @@ async function sendNote() {
     const text = input.value.trim();
 
     if (!text || !currentGroup) return;
+
+    if (text.length > MAX_TEXT_LENGTH) {
+        alert(`メッセージは${MAX_TEXT_LENGTH}文字以内で入力してください。`);
+        return;
+    }
 
     const currentUser = Storage.getCurrentUser();
 
@@ -1067,18 +916,22 @@ async function sendNote() {
     input.value = '';
 
     try {
-        if (firebaseEnabled) {
-            await Storage.addNote(currentGroup, note);
-        } else {
-            const group = await Storage.getGroup(currentGroup);
-            if (group) {
-                group.notes.push(note);
-                await Storage.saveGroup(currentGroup, group);
-                renderNotes(group.notes);
-            }
-        }
+        await Storage.addNote(currentGroup, note);
     } catch (error) {
         console.error('送信エラー:', error);
+    }
+}
+
+async function deleteNote(noteKey) {
+    if (!currentGroup || !noteKey) return;
+
+    if (!confirm('このメッセージを削除しますか？')) return;
+
+    try {
+        await db.ref('groups/' + currentGroup + '/notes/' + noteKey).remove();
+    } catch (error) {
+        console.error('削除エラー:', error);
+        alert('メッセージの削除に失敗しました');
     }
 }
 
@@ -1097,9 +950,12 @@ function renderNotes(notes) {
 
         const isOwn = note.sender === currentUser.name;
 
+        const deleteBtn = isOwn && note._key ? `<button class="delete-note-btn" onclick="deleteNote('${note._key}')">×</button>` : '';
+
         if (note.type === 'image') {
             return `
                 <div class="message ${isOwn ? 'own' : 'other'}">
+                    ${deleteBtn}
                     ${!isOwn ? `<div class="sender">${note.sender}</div>` : ''}
                     <div class="image-content">
                         <img src="${note.imageUrl}" alt="画像" onclick="openImageModal(this.src)">
@@ -1111,6 +967,7 @@ function renderNotes(notes) {
 
         return `
             <div class="message ${isOwn ? 'own' : 'other'}">
+                ${deleteBtn}
                 ${!isOwn ? `<div class="sender">${note.sender}</div>` : ''}
                 <div class="text">${escapeHtml(note.text)}</div>
                 <div class="time">${formatTime(note.timestamp)}</div>
@@ -1118,7 +975,18 @@ function renderNotes(notes) {
         `;
     }).join('');
 
+    // 即座にスクロール
     container.scrollTop = container.scrollHeight;
+
+    // 画像読み込み後に再度スクロール
+    const images = container.querySelectorAll('img');
+    images.forEach(img => {
+        if (!img.complete) {
+            img.addEventListener('load', () => {
+                container.scrollTop = container.scrollHeight;
+            }, { once: true });
+        }
+    });
 }
 
 function openImageModal(src) {
@@ -1148,39 +1016,26 @@ function escapeHtml(text) {
 
 // ========== 初期化 ==========
 function checkAuthAndNavigate() {
-    if (firebaseEnabled && auth.currentUser) {
-        showLobby();
-    } else if (!firebaseEnabled && Storage.getCurrentUser()) {
+    if (auth.currentUser) {
         showLobby();
     } else {
         showScreen('auth-screen');
     }
 }
 
-// Firebase Auth状態監視
 function setupAuthListener() {
-    if (firebaseEnabled) {
-        auth.onAuthStateChanged((user) => {
-            if (user) {
-                showLobby();
-            }
-        });
-    }
-}
-
-// storageイベントでローカルモード時の同期
-window.addEventListener('storage', async (e) => {
-    if (!firebaseEnabled && e.key === 'sb_groups' && currentGroup) {
-        const group = await Storage.getGroup(currentGroup);
-        if (group) {
-            renderNotes(group.notes);
+    auth.onAuthStateChanged((user) => {
+        if (user) {
+            showLobby();
         }
-    }
-});
+    });
+}
 
 // 初期化
 document.addEventListener('DOMContentLoaded', () => {
-    firebaseEnabled = initFirebase();
+    if (!initFirebase()) {
+        return;
+    }
     setupAuthListener();
     initAuthScreen();
     initLobbyScreen();

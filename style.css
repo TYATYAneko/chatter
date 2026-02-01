@@ -727,6 +727,36 @@ h2 {
     text-align: right;
 }
 
+.message {
+    position: relative;
+}
+
+.delete-note-btn {
+    position: absolute;
+    top: 4px;
+    right: 4px;
+    width: 20px;
+    height: 20px;
+    padding: 0;
+    border: none;
+    border-radius: 50%;
+    background: rgba(0, 0, 0, 0.3);
+    color: white;
+    font-size: 14px;
+    line-height: 1;
+    cursor: pointer;
+    opacity: 0;
+    transition: opacity 0.2s;
+}
+
+.message:hover .delete-note-btn {
+    opacity: 1;
+}
+
+.delete-note-btn:hover {
+    background: rgba(255, 0, 0, 0.7);
+}
+
 .message.system {
     align-self: center;
     background: #e8e8e8;

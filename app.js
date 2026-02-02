@@ -1,5 +1,5 @@
 // StudyBoard - グループ学習ノートアプリケーション
-// Firebase専用版 v2.5.0
+// Firebase専用版 v2.6.0
 
 // ========== 設定 ==========
 const EMAIL_DOMAIN = 'studyboard.local'; // Firebase Auth用メールドメイン

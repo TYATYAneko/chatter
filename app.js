@@ -620,6 +620,9 @@ async function sendImage(file) {
         };
 
         await Storage.addNote(currentGroup, note);
+        // 自分が送信したメッセージも既読にする
+        currentReadCount++;
+        await Storage.setReadCount(currentGroup, currentReadCount);
     } catch (error) {
         console.error('画像送信エラー:', error);
         alert('画像の送信に失敗しました');
@@ -727,9 +730,6 @@ async function showGroupInfo() {
         document.getElementById('info-room-creator').textContent = group.creator;
         document.getElementById('info-room-members').textContent = group.members.join(', ');
 
-        const notificationToggle = document.getElementById('notification-toggle');
-        notificationToggle.checked = Storage.isNotificationEnabled(currentGroup);
-
         document.getElementById('room-info-modal').classList.remove('hidden');
     } catch (error) {
         console.error('グループ情報取得エラー:', error);
@@ -746,8 +746,8 @@ function showSettings() {
         btn.classList.toggle('active', btn.dataset.size === settings.fontSize);
     });
 
-    const settingsNotificationToggle = document.getElementById('settings-notification-toggle');
-    settingsNotificationToggle.checked = Storage.isNotificationEnabled(currentGroup);
+    const notificationToggle = document.getElementById('notification-toggle');
+    notificationToggle.checked = Storage.isNotificationEnabled(currentGroup);
 
     document.getElementById('settings-modal').classList.remove('hidden');
 }
@@ -815,19 +815,6 @@ function initSettings() {
             }
         }
         Storage.setNotificationEnabled(currentGroup, notificationToggle.checked);
-    });
-
-    const settingsNotificationToggle = document.getElementById('settings-notification-toggle');
-    settingsNotificationToggle.addEventListener('change', async () => {
-        if (settingsNotificationToggle.checked) {
-            const granted = await Notification.requestPermission();
-            if (!granted) {
-                settingsNotificationToggle.checked = false;
-                alert('通知の許可が必要です。ブラウザの設定で通知を許可してください。');
-                return;
-            }
-        }
-        Storage.setNotificationEnabled(currentGroup, settingsNotificationToggle.checked);
     });
 
     applySettings();
@@ -974,6 +961,9 @@ async function sendNote() {
 
     try {
         await Storage.addNote(currentGroup, note);
+        // 自分が送信したメッセージも既読にする
+        currentReadCount++;
+        await Storage.setReadCount(currentGroup, currentReadCount);
     } catch (error) {
         console.error('送信エラー:', error);
     }

@@ -689,6 +689,7 @@ function initChatScreen() {
         stopGroupListener();
         currentGroup = null;
         firstUnreadKey = null;
+        cancelReply(); // リプライ状態をリセット
         await showLobby();
     });
 
@@ -724,6 +725,10 @@ function initChatScreen() {
     noteInput.addEventListener('keypress', (e) => {
         if (e.key === 'Enter') sendNote();
     });
+
+    // リプライキャンセルボタン
+    const cancelReplyBtn = document.getElementById('cancel-reply-btn');
+    cancelReplyBtn.addEventListener('click', cancelReply);
 
     // 画像アップロード
     const imageInput = document.getElementById('image-input');
@@ -1247,6 +1252,7 @@ let lastNoteCount = 0;
 let oldestLoadedKey = null; // 読み込んだ最古のメッセージのキー
 let hasMoreOldMessages = true; // 古いメッセージがまだあるか
 let currentLastReadKey = null; // 現在の既読キー
+let replyingTo = null; // リプライ先のメッセージ情報
 
 function startGroupListener(code, preserveCache = false) {
     stopGroupListener();
@@ -1354,6 +1360,16 @@ async function sendNote() {
         timestamp: Date.now()
     };
 
+    // リプライ情報を追加
+    if (replyingTo) {
+        note.replyTo = {
+            key: replyingTo.key,
+            sender: replyingTo.sender,
+            text: replyingTo.text ? replyingTo.text.substring(0, 50) : '[画像]'
+        };
+        cancelReply();
+    }
+
     input.value = '';
 
     try {
@@ -1362,6 +1378,42 @@ async function sendNote() {
     } catch (error) {
         console.error('送信エラー:', error);
     }
+}
+
+// リプライを開始
+function startReply(noteKey, sender, text) {
+    replyingTo = {
+        key: noteKey,
+        sender: sender,
+        text: text
+    };
+
+    const previewText = text ? text.substring(0, 30) + (text.length > 30 ? '...' : '') : '[画像]';
+    document.getElementById('reply-preview-text').textContent = `${sender}: ${previewText}`;
+    document.getElementById('reply-preview').classList.remove('hidden');
+    document.getElementById('message-input').focus();
+}
+
+// リプライをキャンセル
+function cancelReply() {
+    replyingTo = null;
+    document.getElementById('reply-preview').classList.add('hidden');
+    document.getElementById('reply-preview-text').textContent = '';
+}
+
+// リプライ先メッセージにスクロール
+function scrollToMessage(noteKey) {
+    const messages = document.querySelectorAll('.message[data-key]');
+    for (const msg of messages) {
+        if (msg.dataset.key === noteKey) {
+            msg.scrollIntoView({ behavior: 'smooth', block: 'center' });
+            msg.classList.add('highlight');
+            setTimeout(() => msg.classList.remove('highlight'), 2000);
+            return;
+        }
+    }
+    // メッセージが見つからない場合（古いメッセージの場合）
+    alert('このメッセージは表示範囲外です。古いメッセージを読み込んでください。');
 }
 
 async function deleteNote(noteKey) {
@@ -1401,14 +1453,31 @@ function renderNotesWithLimit(notes, scrollToBottom = true) {
         }
 
         const isOwn = note.sender === currentUser.name;
+        const noteText = note.text || '';
+        const escapedText = escapeHtml(noteText).replace(/'/g, "\\'").replace(/\n/g, ' ');
 
         const deleteBtn = isOwn && note._key ? `<button class="delete-note-btn" onclick="deleteNote('${note._key}')">×</button>` : '';
+        const replyBtn = note._key ? `<button class="reply-btn" onclick="startReply('${note._key}', '${note.sender}', '${escapedText}')" title="返信">↩</button>` : '';
+
+        // リプライ引用の表示
+        let replyQuote = '';
+        if (note.replyTo) {
+            const replyText = note.replyTo.text || '[画像]';
+            replyQuote = `
+                <div class="reply-quote" onclick="scrollToMessage('${note.replyTo.key}')">
+                    <div class="reply-quote-sender">${note.replyTo.sender}</div>
+                    <div class="reply-quote-text">${escapeHtml(replyText)}</div>
+                </div>
+            `;
+        }
 
         if (note.type === 'image') {
             return `
-                <div class="message ${isOwn ? 'own' : 'other'}">
+                <div class="message ${isOwn ? 'own' : 'other'}" data-key="${note._key || ''}">
                     ${deleteBtn}
+                    ${replyBtn}
                     ${!isOwn ? `<div class="sender">${note.sender}</div>` : ''}
+                    ${replyQuote}
                     <div class="image-content">
                         <img src="${note.imageUrl}" alt="画像" onclick="openImageModal(this.src)">
                     </div>
@@ -1418,9 +1487,11 @@ function renderNotesWithLimit(notes, scrollToBottom = true) {
         }
 
         return `
-            <div class="message ${isOwn ? 'own' : 'other'}">
+            <div class="message ${isOwn ? 'own' : 'other'}" data-key="${note._key || ''}">
                 ${deleteBtn}
+                ${replyBtn}
                 ${!isOwn ? `<div class="sender">${note.sender}</div>` : ''}
+                ${replyQuote}
                 <div class="text">${linkify(escapeHtml(note.text))}</div>
                 <div class="time">${formatTime(note.timestamp)}</div>
             </div>

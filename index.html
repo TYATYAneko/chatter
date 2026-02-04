@@ -129,6 +129,13 @@
                 </div>
             </div>
             <div id="messages" class="messages"></div>
+            <div id="reply-preview" class="reply-preview hidden">
+                <div class="reply-preview-content">
+                    <span class="reply-preview-label">返信先:</span>
+                    <span id="reply-preview-text"></span>
+                </div>
+                <button id="cancel-reply-btn" class="cancel-reply-btn">×</button>
+            </div>
             <div class="chat-input">
                 <label class="image-upload-btn" for="image-input">
                     <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
@@ -231,7 +238,7 @@
     </div>
 
     <!-- バージョン表示 -->
-    <div class="version">v2.9.0</div>
+    <div class="version">v2.10.0</div>
 
     <!-- Firebase SDK -->
     <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-app-compat.js"></script>

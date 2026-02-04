@@ -940,16 +940,122 @@ async function showGroupInfo() {
         const group = await Storage.getGroup(currentGroup);
         if (!group) return;
 
+        const currentUser = Storage.getCurrentUser();
+        const isCreator = currentUser && currentUser.name === group.creator;
+
         document.getElementById('info-room-name').textContent = group.name;
         document.getElementById('info-room-code').textContent = group.code;
         document.getElementById('info-room-creator').textContent = group.creator;
-        document.getElementById('info-room-members').textContent = group.members.join(', ');
+
+        // 存在しないメンバーを検出（userGroupsを確認）
+        const invalidMemberCount = await detectInvalidMembers(currentGroup, group.members);
+
+        // メンバーをリスト形式で表示
+        const membersContainer = document.getElementById('info-room-members');
+        membersContainer.innerHTML = group.members.map(memberName => {
+            const isCurrentUser = currentUser && memberName === currentUser.name;
+            const isMemberCreator = memberName === group.creator;
+
+            let badges = '';
+            if (isMemberCreator) {
+                badges += '<span class="member-badge">作成者</span>';
+            }
+            if (isCurrentUser) {
+                badges += '<span class="member-badge you">あなた</span>';
+            }
+
+            let kickBtn = '';
+            // 作成者のみが他のメンバーを退出させられる（自分自身と作成者は除く）
+            if (isCreator && !isCurrentUser && !isMemberCreator) {
+                kickBtn = `<button class="kick-member-btn" onclick="kickMember('${memberName}')">退出させる</button>`;
+            }
+
+            const itemClass = isMemberCreator ? 'member-item is-creator' : 'member-item';
+
+            return `
+                <div class="${itemClass}">
+                    <span class="member-name">${memberName}${badges}</span>
+                    ${kickBtn}
+                </div>
+            `;
+        }).join('');
+
+        // 無効なメンバーがいる場合は通知を表示
+        if (invalidMemberCount > 0 && isCreator) {
+            membersContainer.innerHTML += `
+                <div class="auto-cleanup-notice">
+                    ⚠️ 約${invalidMemberCount}人の無効なメンバーがいる可能性があります。<br>
+                    心当たりのあるメンバーを「退出させる」で削除してください。
+                </div>
+            `;
+        }
 
         document.getElementById('room-info-modal').classList.remove('hidden');
     } catch (error) {
         console.error('グループ情報取得エラー:', error);
     }
 }
+
+// 存在しないメンバーを検出（UID数とメンバー数の差分を返す）
+async function detectInvalidMembers(groupCode, members) {
+    try {
+        const snapshot = await db.ref('userGroups').once('value');
+        const allUserGroups = snapshot.val() || {};
+
+        // このグループに参加しているUIDの数をカウント
+        const validUidCount = Object.keys(allUserGroups).filter(uid => {
+            const groups = allUserGroups[uid];
+            return Array.isArray(groups) && groups.includes(groupCode);
+        }).length;
+
+        // メンバー数とUID数の差分（無効なメンバー数）
+        const invalidCount = members.length - validUidCount;
+        return invalidCount > 0 ? invalidCount : 0;
+    } catch (error) {
+        console.error('メンバー検証エラー:', error);
+        return 0;
+    }
+}
+
+// メンバーを退出させる
+async function kickMember(memberName) {
+    const currentUser = Storage.getCurrentUser();
+    if (!currentUser) return;
+
+    const group = await Storage.getGroup(currentGroup);
+    if (!group || group.creator !== currentUser.name) {
+        alert('グループ作成者のみがメンバーを退出させられます');
+        return;
+    }
+
+    if (!confirm(`${memberName}さんをグループから退出させますか？`)) return;
+
+    try {
+        // グループのmembersから削除
+        group.members = group.members.filter(name => name !== memberName);
+        await db.ref('groups/' + currentGroup + '/members').set(group.members);
+
+        // 退出メッセージを追加
+        const kickNote = {
+            type: 'system',
+            text: `${memberName}さんが退出しました`,
+            timestamp: Date.now(),
+            sender: currentUser.name
+        };
+        await db.ref('groups/' + currentGroup + '/notes').push(kickNote);
+
+        // 注意: 退出させられたユーザーのuserGroupsは自動更新されない
+        // そのユーザーが次回アクセス時にグループが存在しないことを検知して対応
+
+        // グループ情報を再表示
+        await showGroupInfo();
+
+    } catch (error) {
+        console.error('メンバー退出エラー:', error);
+        alert('メンバーの退出に失敗しました');
+    }
+}
+
 
 function showSettings(fromLobby = false) {
     const settings = Storage.getSettings();
@@ -1075,8 +1181,30 @@ let firstUnreadKey = null; // 最初の未読メッセージのキー（スク�
 
 async function enterGroup(code) {
     const group = await Storage.getGroup(code);
+    const currentUser = Storage.getCurrentUser();
 
-    if (!group) return;
+    if (!group) {
+        // グループが存在しない場合、userGroupsから削除
+        if (currentUser) {
+            const userGroups = await Storage.getUserGroups(currentUser.uid);
+            const newGroups = userGroups.filter(c => c !== code);
+            await Storage.saveUserGroups(currentUser.uid, newGroups);
+            await updateMyGroups();
+        }
+        alert('このグループは削除されました');
+        return;
+    }
+
+    // 自分がメンバーに含まれているかチェック（退出させられた場合の対応）
+    if (currentUser && !group.members.includes(currentUser.name)) {
+        // メンバーでない場合、userGroupsから削除
+        const userGroups = await Storage.getUserGroups(currentUser.uid);
+        const newGroups = userGroups.filter(c => c !== code);
+        await Storage.saveUserGroups(currentUser.uid, newGroups);
+        await updateMyGroups();
+        alert('このグループから退出させられました');
+        return;
+    }
 
     // ロビーリスナーを停止
     stopLobbyListeners();

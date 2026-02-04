@@ -91,8 +91,8 @@ Realtime Database → ルール で以下を設定:
       }
     },
     "groups": {
+      ".read": "auth != null",
       "$groupCode": {
-        ".read": "auth != null",
         ".write": "auth != null"
       }
     },

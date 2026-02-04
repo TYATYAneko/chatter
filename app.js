@@ -377,15 +377,19 @@ function initLobbyScreen() {
                 name,
                 code,
                 creator: currentUser.name,
-                notes: [{
-                    type: 'system',
-                    text: `${currentUser.name}さんがグループを作成しました`,
-                    timestamp: Date.now(),
-                    sender: currentUser.name
-                }],
+                notes: {},
                 members: [currentUser.name]
             };
             await Storage.saveGroup(code, newGroup);
+
+            // システムメッセージをpush()で追加（キー形式を統一）
+            const systemNote = {
+                type: 'system',
+                text: `${currentUser.name}さんがグループを作成しました`,
+                timestamp: Date.now(),
+                sender: currentUser.name
+            };
+            await db.ref('groups/' + code + '/notes').push(systemNote);
 
             const userGroups = await Storage.getUserGroups(currentUser.uid);
             if (!userGroups.includes(code)) {
@@ -535,12 +539,16 @@ function startLobbyListeners() {
                     const notes = snapshot.val();
                     if (!notes) return;
 
-                    const keys = Object.keys(notes);
                     const lastReadKey = lastReadKeysCache[code];
 
                     let unreadCount = 0;
                     if (lastReadKey) {
-                        unreadCount = keys.filter(k => k > lastReadKey).length;
+                        // 自分のメッセージを除外してカウント
+                        Object.entries(notes).forEach(([key, note]) => {
+                            if (key > lastReadKey && note.sender !== currentUser.name) {
+                                unreadCount++;
+                            }
+                        });
                     }
                     // 初めて見るグループで既読キーがない場合は0
                     updateUnreadBadge(code, unreadCount);
@@ -560,12 +568,17 @@ async function updateUnreadBadgeFromFirebase(code) {
     const group = await Storage.getGroup(code);
     if (!group || !group.notes) return;
 
-    const keys = Object.keys(group.notes);
+    const currentUser = Storage.getCurrentUser();
     const lastReadKey = lastReadKeysCache[code];
 
     let unreadCount = 0;
     if (lastReadKey) {
-        unreadCount = keys.filter(k => k > lastReadKey).length;
+        // 自分のメッセージを除外してカウント
+        Object.entries(group.notes).forEach(([key, note]) => {
+            if (key > lastReadKey && note.sender !== currentUser.name) {
+                unreadCount++;
+            }
+        });
     }
     // 初めて見るグループで既読キーがない場合は0
 
@@ -611,10 +624,14 @@ async function updateMyGroups() {
                 const group = groups[code];
                 let unreadCount = 0;
                 if (group.notes && typeof group.notes === 'object') {
-                    const keys = Object.keys(group.notes);
                     const lastReadKey = lastReadKeysCache[code];
                     if (lastReadKey) {
-                        unreadCount = keys.filter(k => k > lastReadKey).length;
+                        // 自分のメッセージを除外してカウント
+                        Object.entries(group.notes).forEach(([key, note]) => {
+                            if (key > lastReadKey && note.sender !== currentUser.name) {
+                                unreadCount++;
+                            }
+                        });
                     }
                     // 初めて見るグループで既読キーがない場合は0
                 }

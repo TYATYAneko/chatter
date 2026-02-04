@@ -43,32 +43,27 @@ const Storage = {
         localStorage.setItem('sb_settings', JSON.stringify(settings));
     },
 
-    // 既読管理（Firebase同期）
-    _readCountsCache: {},
-    async getReadCounts() {
+    // 既読管理（Firebase同期）- 最後に読んだメッセージキーを保存
+    _lastReadKeysCache: {},
+    async getLastReadKeys() {
         if (!auth.currentUser) return {};
         try {
-            const snapshot = await db.ref('userReadCounts/' + auth.currentUser.uid).once('value');
-            this._readCountsCache = snapshot.val() || {};
-            return this._readCountsCache;
+            const snapshot = await db.ref('userLastReadKeys/' + auth.currentUser.uid).once('value');
+            this._lastReadKeysCache = snapshot.val() || {};
+            return this._lastReadKeysCache;
         } catch (error) {
             console.error('既読データ取得エラー:', error);
-            return this._readCountsCache || {};
+            return this._lastReadKeysCache || {};
         }
     },
-    async setReadCount(groupCode, count) {
+    async setLastReadKey(groupCode, messageKey) {
         if (!auth.currentUser) return;
-        this._readCountsCache[groupCode] = count;
+        this._lastReadKeysCache[groupCode] = messageKey;
         try {
-            await db.ref('userReadCounts/' + auth.currentUser.uid + '/' + groupCode).set(count);
+            await db.ref('userLastReadKeys/' + auth.currentUser.uid + '/' + groupCode).set(messageKey);
         } catch (error) {
             console.error('既読データ保存エラー:', error);
         }
-    },
-    async getUnreadCount(groupCode, totalCount) {
-        const readCounts = await this.getReadCounts();
-        const lastRead = readCounts[groupCode] || 0;
-        return Math.max(0, totalCount - lastRead);
     },
 
     // 通知設定
@@ -492,7 +487,7 @@ async function updateMyGroups() {
     try {
         const userGroups = await Storage.getUserGroups(currentUser.uid);
         const groups = await Storage.getGroups();
-        const readCounts = await Storage.getReadCounts();
+        const lastReadKeys = await Storage.getLastReadKeys();
 
         if (!userGroups || userGroups.length === 0) {
             container.innerHTML = '<p style="color: #888; text-align: center;">参加中のグループはありません</p>';
@@ -503,9 +498,18 @@ async function updateMyGroups() {
             .filter(code => groups[code])
             .map(code => {
                 const group = groups[code];
-                const noteCount = group.notes ? (Array.isArray(group.notes) ? group.notes.length : Object.keys(group.notes).length) : 0;
-                const lastRead = readCounts[code] || 0;
-                const unreadCount = Math.max(0, noteCount - lastRead);
+                let unreadCount = 0;
+                if (group.notes && typeof group.notes === 'object') {
+                    const keys = Object.keys(group.notes);
+                    const lastReadKey = lastReadKeys[code];
+                    if (lastReadKey) {
+                        // 最後に読んだキーより後のメッセージを数える
+                        unreadCount = keys.filter(key => key > lastReadKey).length;
+                    } else {
+                        // 初めて見るグループは全メッセージが未読
+                        unreadCount = keys.length;
+                    }
+                }
                 const unreadBadge = unreadCount > 0
                     ? `<span class="unread-badge">${unreadCount > 99 ? '99+' : unreadCount}</span>`
                     : '';
@@ -620,9 +624,7 @@ async function sendImage(file) {
         };
 
         await Storage.addNote(currentGroup, note);
-        // 自分が送信したメッセージも既読にする
-        currentReadCount++;
-        await Storage.setReadCount(currentGroup, currentReadCount);
+        // 自分が送信したメッセージはstartGroupListenerで自動的に既読処理される
     } catch (error) {
         console.error('画像送信エラー:', error);
         alert('画像の送信に失敗しました');
@@ -841,9 +843,14 @@ async function enterGroup(code) {
     document.getElementById('room-title').textContent = group.name;
     document.getElementById('room-code-info').textContent = group.code;
 
-    const noteCount = group.notes ? (Array.isArray(group.notes) ? group.notes.length : Object.keys(group.notes).length) : 0;
-    currentReadCount = noteCount; // 総メッセージ数を既読として記録
-    await Storage.setReadCount(code, noteCount);
+    // 最後のメッセージキーを取得して既読として記録
+    if (group.notes && typeof group.notes === 'object') {
+        const keys = Object.keys(group.notes);
+        if (keys.length > 0) {
+            currentLastReadKey = keys[keys.length - 1];
+            await Storage.setLastReadKey(code, currentLastReadKey);
+        }
+    }
 
     // グローバル変数をリセット
     allNotesCache = [];
@@ -859,7 +866,7 @@ async function enterGroup(code) {
 let lastNoteCount = 0;
 let oldestLoadedKey = null; // 読み込んだ最古のメッセージのキー
 let hasMoreOldMessages = true; // 古いメッセージがまだあるか
-let currentReadCount = 0; // 現在の既読数（減らさないように管理）
+let currentLastReadKey = null; // 現在の既読キー
 
 function startGroupListener(code, preserveCache = false) {
     stopGroupListener();
@@ -905,9 +912,11 @@ function startGroupListener(code, preserveCache = false) {
                 if (!isFirstLoad && notesArray.length > lastNoteCount) {
                     const newNotes = notesArray.slice(lastNoteCount);
                     await sendNotifications(code, newNotes);
-                    // 新しいメッセージが来た分だけ既読数を増やす
-                    currentReadCount += newNotes.length;
-                    await Storage.setReadCount(code, currentReadCount);
+                }
+                // 最後のメッセージキーを既読として記録
+                if (notesArray.length > 0) {
+                    currentLastReadKey = notesArray[notesArray.length - 1]._key;
+                    await Storage.setLastReadKey(code, currentLastReadKey);
                 }
                 lastNoteCount = notesArray.length;
                 isFirstLoad = false;
@@ -961,9 +970,7 @@ async function sendNote() {
 
     try {
         await Storage.addNote(currentGroup, note);
-        // 自分が送信したメッセージも既読にする
-        currentReadCount++;
-        await Storage.setReadCount(currentGroup, currentReadCount);
+        // 自分が送信したメッセージはstartGroupListenerで自動的に既読処理される
     } catch (error) {
         console.error('送信エラー:', error);
     }

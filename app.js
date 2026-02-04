@@ -1,5 +1,5 @@
 // StudyBoard - グループ学習ノートアプリケーション
-// Firebase専用版 v2.6.0
+// Firebase専用版 v2.7.0
 
 // ========== 設定 ==========
 const EMAIL_DOMAIN = 'studyboard.local'; // Firebase Auth用メールドメイン
@@ -327,16 +327,15 @@ function initAuthScreen() {
 
 // ロビー画面
 function initLobbyScreen() {
-    const logoutBtn = document.getElementById('logout-btn');
+    const lobbySettingsBtn = document.getElementById('lobby-settings-btn');
     const createBtn = document.getElementById('create-room-btn');
     const joinBtn = document.getElementById('join-room-btn');
     const copyCodeBtn = document.getElementById('copy-code-btn');
     const groupName = document.getElementById('room-name');
     const joinCode = document.getElementById('join-code');
 
-    logoutBtn.addEventListener('click', async () => {
-        await auth.signOut();
-        showScreen('auth-screen');
+    lobbySettingsBtn.addEventListener('click', () => {
+        showSettings(true); // ロビーからの設定画面表示
     });
 
     createBtn.addEventListener('click', async () => {
@@ -472,12 +471,125 @@ function initLobbyScreen() {
     });
 }
 
+// 未読管理（Firebaseに同期）
+let lobbyListeners = {}; // ロビー用のリアルタイムリスナー
+let lastReadKeysCache = {}; // 既読キーのキャッシュ（リアルタイム同期用）
+let lastReadKeysListener = null; // 既読キーのリスナー
+
 async function showLobby() {
     const currentUser = Storage.getCurrentUser();
     document.getElementById('current-user').textContent = currentUser.name;
     document.getElementById('room-code-display').classList.add('hidden');
+
+    // Firebaseから既読キーを取得してキャッシュ
+    lastReadKeysCache = await Storage.getLastReadKeys();
+
     await updateMyGroups();
+    startLobbyListeners();
+    startLastReadKeysListener(); // 既読キーのリアルタイム同期開始
     showScreen('lobby-screen');
+}
+
+// 既読キーのリアルタイムリスナー（他端末との同期用）
+function startLastReadKeysListener() {
+    stopLastReadKeysListener();
+    if (!auth.currentUser) return;
+
+    lastReadKeysListener = db.ref('userLastReadKeys/' + auth.currentUser.uid)
+        .on('value', (snapshot) => {
+            const newKeys = snapshot.val() || {};
+            const oldKeys = lastReadKeysCache;
+            lastReadKeysCache = newKeys;
+
+            // 変更があったグループのバッジを更新
+            const allGroups = new Set([...Object.keys(oldKeys), ...Object.keys(newKeys)]);
+            allGroups.forEach(code => {
+                if (oldKeys[code] !== newKeys[code]) {
+                    updateUnreadBadgeFromFirebase(code);
+                }
+            });
+        });
+}
+
+function stopLastReadKeysListener() {
+    if (lastReadKeysListener && auth.currentUser) {
+        db.ref('userLastReadKeys/' + auth.currentUser.uid).off('value', lastReadKeysListener);
+        lastReadKeysListener = null;
+    }
+}
+
+// ロビー用のリアルタイムリスナー（新着メッセージをリアルタイム更新）
+function startLobbyListeners() {
+    stopLobbyListeners();
+
+    const currentUser = Storage.getCurrentUser();
+    if (!currentUser) return;
+
+    Storage.getUserGroups(currentUser.uid).then(userGroups => {
+        if (!userGroups) return;
+
+        for (const code of userGroups) {
+            // 新着メッセージをリアルタイムで監視
+            lobbyListeners[code] = db.ref('groups/' + code + '/notes')
+                .on('value', (snapshot) => {
+                    const notes = snapshot.val();
+                    if (!notes) return;
+
+                    const keys = Object.keys(notes);
+                    const lastReadKey = lastReadKeysCache[code];
+
+                    let unreadCount = 0;
+                    if (lastReadKey) {
+                        unreadCount = keys.filter(k => k > lastReadKey).length;
+                    }
+                    // 初めて見るグループで既読キーがない場合は0
+                    updateUnreadBadge(code, unreadCount);
+                });
+        }
+    });
+}
+
+function stopLobbyListeners() {
+    for (const code in lobbyListeners) {
+        db.ref('groups/' + code + '/notes').off('value', lobbyListeners[code]);
+    }
+    lobbyListeners = {};
+}
+
+async function updateUnreadBadgeFromFirebase(code) {
+    const group = await Storage.getGroup(code);
+    if (!group || !group.notes) return;
+
+    const keys = Object.keys(group.notes);
+    const lastReadKey = lastReadKeysCache[code];
+
+    let unreadCount = 0;
+    if (lastReadKey) {
+        unreadCount = keys.filter(k => k > lastReadKey).length;
+    }
+    // 初めて見るグループで既読キーがない場合は0
+
+    updateUnreadBadge(code, unreadCount);
+}
+
+function updateUnreadBadge(code, count) {
+    const roomItems = document.querySelectorAll('.room-item');
+    roomItems.forEach(item => {
+        const roomCode = item.querySelector('.room-code');
+        if (roomCode && roomCode.textContent === code) {
+            const roomName = item.querySelector('.room-name');
+            // 既存のバッジを削除
+            const existingBadge = roomName.querySelector('.unread-badge');
+            if (existingBadge) existingBadge.remove();
+            // 新しいバッジを追加
+            if (count > 0) {
+                const badge = document.createElement('span');
+                badge.className = 'unread-badge';
+                badge.textContent = count > 99 ? '99+' : count;
+                roomName.appendChild(badge);
+            }
+        }
+    });
 }
 
 async function updateMyGroups() {
@@ -487,7 +599,6 @@ async function updateMyGroups() {
     try {
         const userGroups = await Storage.getUserGroups(currentUser.uid);
         const groups = await Storage.getGroups();
-        const lastReadKeys = await Storage.getLastReadKeys();
 
         if (!userGroups || userGroups.length === 0) {
             container.innerHTML = '<p style="color: #888; text-align: center;">参加中のグループはありません</p>';
@@ -501,14 +612,11 @@ async function updateMyGroups() {
                 let unreadCount = 0;
                 if (group.notes && typeof group.notes === 'object') {
                     const keys = Object.keys(group.notes);
-                    const lastReadKey = lastReadKeys[code];
+                    const lastReadKey = lastReadKeysCache[code];
                     if (lastReadKey) {
-                        // 最後に読んだキーより後のメッセージを数える
-                        unreadCount = keys.filter(key => key > lastReadKey).length;
-                    } else {
-                        // 初めて見るグループは全メッセージが未読
-                        unreadCount = keys.length;
+                        unreadCount = keys.filter(k => k > lastReadKey).length;
                     }
+                    // 初めて見るグループで既読キーがない場合は0
                 }
                 const unreadBadge = unreadCount > 0
                     ? `<span class="unread-badge">${unreadCount > 99 ? '99+' : unreadCount}</span>`
@@ -540,10 +648,11 @@ function initChatScreen() {
     const settingsBtn = document.getElementById('settings-btn');
     const infoBtn = document.getElementById('room-info-btn');
 
-    backBtn.addEventListener('click', () => {
+    backBtn.addEventListener('click', async () => {
         stopGroupListener();
         currentGroup = null;
-        showLobby();
+        firstUnreadKey = null;
+        await showLobby();
     });
 
     menuBtn.addEventListener('click', (e) => {
@@ -687,11 +796,78 @@ async function doLeaveGroup() {
     }
 }
 
+// アカウント削除
+async function deleteAccount() {
+    const currentUser = Storage.getCurrentUser();
+    if (!currentUser) return;
+
+    try {
+        showLoading(true);
+
+        // 1. すべてのグループから退出
+        const userGroups = await Storage.getUserGroups(currentUser.uid);
+        const groups = await Storage.getGroups();
+
+        if (userGroups && userGroups.length > 0) {
+            for (const groupCode of userGroups) {
+                const group = groups[groupCode];
+                if (group) {
+                    // グループからメンバーを削除
+                    group.members = group.members.filter(name => name !== currentUser.name);
+
+                    if (group.members.length === 0) {
+                        // メンバーがいなくなったらグループを削除
+                        await db.ref('groups/' + groupCode).remove();
+                    } else {
+                        // 退出メッセージを追加
+                        const leaveNote = {
+                            type: 'system',
+                            text: `${currentUser.name}さんが退出しました`,
+                            timestamp: Date.now(),
+                            sender: currentUser.name
+                        };
+                        await db.ref('groups/' + groupCode + '/members').set(group.members);
+                        await db.ref('groups/' + groupCode + '/notes').push(leaveNote);
+                    }
+                }
+            }
+        }
+
+        // 2. ユーザーデータを削除
+        await db.ref('userGroups/' + currentUser.uid).remove();
+        await db.ref('userLastReadKeys/' + currentUser.uid).remove();
+
+        // 3. Firebase Authからユーザーを削除
+        await auth.currentUser.delete();
+
+        // 4. ローカルストレージをクリア
+        localStorage.removeItem('sb_settings');
+        localStorage.removeItem('sb_notifications');
+
+        showLoading(false);
+        alert('アカウントを削除しました');
+        showScreen('auth-screen');
+
+    } catch (error) {
+        showLoading(false);
+        console.error('アカウント削除エラー:', error);
+
+        if (error.code === 'auth/requires-recent-login') {
+            alert('セキュリティのため、再度ログインしてからアカウントを削除してください。');
+            await auth.signOut();
+            showScreen('auth-screen');
+        } else {
+            alert('アカウントの削除に失敗しました。しばらくしてから再度お試しください。');
+        }
+    }
+}
+
 // カスタム確認モーダル
 let confirmCallback = null;
 
-function showConfirm(message, callback) {
+function showConfirm(message, callback, buttonText = '退出する') {
     document.getElementById('confirm-message').textContent = message;
+    document.getElementById('confirm-ok').textContent = buttonText;
     confirmCallback = callback;
     document.getElementById('confirm-modal').classList.remove('hidden');
 }
@@ -738,7 +914,7 @@ async function showGroupInfo() {
     }
 }
 
-function showSettings() {
+function showSettings(fromLobby = false) {
     const settings = Storage.getSettings();
 
     document.querySelectorAll('.theme-btn').forEach(btn => {
@@ -748,10 +924,20 @@ function showSettings() {
         btn.classList.toggle('active', btn.dataset.size === settings.fontSize);
     });
 
-    const notificationToggle = document.getElementById('notification-toggle');
-    notificationToggle.checked = Storage.isNotificationEnabled(currentGroup);
+    // ロビー: アカウント設定のみ、チャット: それ以外
+    const settingsModal = document.getElementById('settings-modal');
+    document.querySelectorAll('.chat-setting').forEach(el => {
+        el.classList.toggle('hidden', fromLobby);
+    });
+    document.querySelector('.account-section').classList.toggle('hidden', !fromLobby);
+    settingsModal.classList.toggle('from-lobby', fromLobby);
 
-    document.getElementById('settings-modal').classList.remove('hidden');
+    if (!fromLobby) {
+        const notificationToggle = document.getElementById('notification-toggle');
+        notificationToggle.checked = Storage.isNotificationEnabled(currentGroup);
+    }
+
+    settingsModal.classList.remove('hidden');
 }
 
 function initSettings() {
@@ -819,6 +1005,20 @@ function initSettings() {
         Storage.setNotificationEnabled(currentGroup, notificationToggle.checked);
     });
 
+    // ログアウトボタン
+    const settingsLogoutBtn = document.getElementById('settings-logout-btn');
+    settingsLogoutBtn.addEventListener('click', async () => {
+        document.getElementById('settings-modal').classList.add('hidden');
+        await auth.signOut();
+        showScreen('auth-screen');
+    });
+
+    // アカウント削除ボタン
+    const deleteAccountBtn = document.getElementById('delete-account-btn');
+    deleteAccountBtn.addEventListener('click', () => {
+        showConfirm('本当にアカウントを削除しますか？\nすべてのグループから退出し、アカウントが完全に削除されます。', deleteAccount, '削除する');
+    });
+
     applySettings();
 }
 
@@ -834,21 +1034,36 @@ function applySettings() {
     document.body.classList.add(`font-${settings.fontSize}`);
 }
 
+let firstUnreadKey = null; // 最初の未読メッセージのキー（スクロール用）
+
 async function enterGroup(code) {
     const group = await Storage.getGroup(code);
 
     if (!group) return;
 
+    // ロビーリスナーを停止
+    stopLobbyListeners();
+    stopLastReadKeysListener();
+
     currentGroup = code;
     document.getElementById('room-title').textContent = group.name;
     document.getElementById('room-code-info').textContent = group.code;
 
-    // 最後のメッセージキーを取得して既読として記録
+    // 新着メッセージの最初のキーを記録（スクロール用）
+    firstUnreadKey = null;
     if (group.notes && typeof group.notes === 'object') {
-        const keys = Object.keys(group.notes);
+        // キーをソートして順序を保証
+        const keys = Object.keys(group.notes).sort();
+        const lastReadKey = lastReadKeysCache[code];
+        if (lastReadKey) {
+            const unreadKeys = keys.filter(k => k > lastReadKey);
+            if (unreadKeys.length > 0) {
+                firstUnreadKey = unreadKeys[0];
+            }
+        }
+        // 最後のキーを記録（既読更新は閉じるときに行う）
         if (keys.length > 0) {
             currentLastReadKey = keys[keys.length - 1];
-            await Storage.setLastReadKey(code, currentLastReadKey);
         }
     }
 
@@ -887,8 +1102,10 @@ function startGroupListener(code, preserveCache = false) {
         .on('value', async (snapshot) => {
             const notes = snapshot.val();
             if (notes) {
-                // キーを保持したまま配列に変換
-                const notesArray = Object.entries(notes).map(([key, note]) => ({ ...note, _key: key }));
+                // キーを保持したまま配列に変換（キーでソートして順序を保証）
+                const notesArray = Object.entries(notes)
+                    .map(([key, note]) => ({ ...note, _key: key }))
+                    .sort((a, b) => a._key.localeCompare(b._key));
 
                 // 最古のキーを記録
                 if (notesArray.length > 0) {
@@ -898,6 +1115,11 @@ function startGroupListener(code, preserveCache = false) {
                 // 既存の古いメッセージと新しいメッセージをマージ
                 if (isFirstLoad) {
                     allNotesCache = notesArray;
+                    // メッセージ数がINITIAL_MESSAGES_LIMIT未満なら古いメッセージはない
+                    hasMoreOldMessages = notesArray.length >= INITIAL_MESSAGES_LIMIT;
+
+                    // 初回表示時は新着メッセージの位置にスクロール
+                    renderNotesWithUnreadScroll(allNotesCache);
                 } else {
                     // リスナーから取得した最新メッセージで更新
                     // 古いメッセージ（loadMoreで取得したもの）は保持
@@ -905,18 +1127,19 @@ function startGroupListener(code, preserveCache = false) {
                         !notesArray.some(n => n._key === note._key)
                     );
                     allNotesCache = [...oldMessages, ...notesArray];
+                    renderNotes(allNotesCache);
                 }
-
-                renderNotes(allNotesCache);
 
                 if (!isFirstLoad && notesArray.length > lastNoteCount) {
                     const newNotes = notesArray.slice(lastNoteCount);
                     await sendNotifications(code, newNotes);
                 }
-                // 最後のメッセージキーを既読として記録
+                // 最後に読んだキーを更新（Firebaseに同期）
                 if (notesArray.length > 0) {
-                    currentLastReadKey = notesArray[notesArray.length - 1]._key;
-                    await Storage.setLastReadKey(code, currentLastReadKey);
+                    const lastKey = notesArray[notesArray.length - 1]._key;
+                    await Storage.setLastReadKey(code, lastKey);
+                    lastReadKeysCache[code] = lastKey;
+                    currentLastReadKey = lastKey;
                 }
                 lastNoteCount = notesArray.length;
                 isFirstLoad = false;
@@ -1074,7 +1297,9 @@ async function loadMoreMessages() {
 
         const notes = snapshot.val();
         if (notes) {
-            const notesArray = Object.entries(notes).map(([key, note]) => ({ ...note, _key: key }));
+            const notesArray = Object.entries(notes)
+                .map(([key, note]) => ({ ...note, _key: key }))
+                .sort((a, b) => a._key.localeCompare(b._key));
 
             if (notesArray.length > 0) {
                 // 新しい最古のキーを更新
@@ -1113,6 +1338,93 @@ async function loadMoreMessages() {
 
 function renderNotes(notes) {
     renderNotesWithLimit(notes, true);
+}
+
+// 新着メッセージの位置にスクロールする版
+async function renderNotesWithUnreadScroll(notes) {
+    const container = document.getElementById('messages');
+
+    // 新着メッセージがある場合
+    if (firstUnreadKey) {
+        // 新着メッセージが現在のキャッシュに含まれているか確認
+        const unreadIndex = notes.findIndex(note => note._key === firstUnreadKey);
+
+        if (unreadIndex !== -1) {
+            // 新着メッセージがキャッシュにある場合、描画してスクロール
+            renderNotesWithLimit(notes, false);
+
+            // 新着メッセージの位置にスクロール
+            const messages = container.querySelectorAll('.message');
+            if (messages[unreadIndex]) {
+                // 少し上にオフセットしてスクロール
+                messages[unreadIndex].scrollIntoView({ behavior: 'auto', block: 'start' });
+            }
+        } else {
+            // 新着メッセージが20件より前にある場合、古いメッセージを読み込む
+            await loadMessagesUntilUnread();
+            renderNotesWithLimit(allNotesCache, false);
+
+            // 新着メッセージの位置にスクロール
+            const newUnreadIndex = allNotesCache.findIndex(note => note._key === firstUnreadKey);
+            const messages = container.querySelectorAll('.message');
+            if (messages[newUnreadIndex]) {
+                messages[newUnreadIndex].scrollIntoView({ behavior: 'auto', block: 'start' });
+            }
+        }
+        // スクロール後にfirstUnreadKeyをクリア
+        firstUnreadKey = null;
+    } else {
+        // 新着メッセージがない場合は一番下にスクロール
+        renderNotesWithLimit(notes, true);
+    }
+}
+
+// 新着メッセージが見つかるまで古いメッセージを読み込む
+async function loadMessagesUntilUnread() {
+    if (!currentGroup || !firstUnreadKey) return;
+
+    let attempts = 0;
+    const maxAttempts = 5; // 最大5回まで読み込み
+
+    while (attempts < maxAttempts && hasMoreOldMessages) {
+        // 既にキャッシュにあるか確認
+        if (allNotesCache.some(note => note._key === firstUnreadKey)) {
+            break;
+        }
+
+        if (!oldestLoadedKey) break;
+
+        try {
+            const snapshot = await db.ref('groups/' + currentGroup + '/notes')
+                .orderByKey()
+                .endBefore(oldestLoadedKey)
+                .limitToLast(INITIAL_MESSAGES_LIMIT)
+                .once('value');
+
+            const notes = snapshot.val();
+            if (notes) {
+                const notesArray = Object.entries(notes)
+                    .map(([key, note]) => ({ ...note, _key: key }))
+                    .sort((a, b) => a._key.localeCompare(b._key));
+
+                if (notesArray.length > 0) {
+                    oldestLoadedKey = notesArray[0]._key;
+                    allNotesCache = [...notesArray, ...allNotesCache];
+                }
+
+                if (notesArray.length < INITIAL_MESSAGES_LIMIT) {
+                    hasMoreOldMessages = false;
+                }
+            } else {
+                hasMoreOldMessages = false;
+            }
+        } catch (error) {
+            console.error('古いメッセージの読み込みエラー:', error);
+            break;
+        }
+
+        attempts++;
+    }
 }
 
 function openImageModal(src) {

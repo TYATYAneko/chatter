@@ -1753,3 +1753,8 @@ document.addEventListener('DOMContentLoaded', () => {
 
 // グローバル関数として公開
 window.enterGroup = enterGroup;
+window.deleteNote = deleteNote;
+window.startReply = startReply;
+window.scrollToMessage = scrollToMessage;
+window.kickMember = kickMember;
+window.cancelReply = cancelReply;

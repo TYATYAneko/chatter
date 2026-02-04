@@ -1,5 +1,5 @@
 // StudyBoard - グループ学習ノートアプリケーション
-// Firebase専用版 v2.7.0
+// Firebase専用版 v2.8.0
 
 // ========== 設定 ==========
 const EMAIL_DOMAIN = 'studyboard.local'; // Firebase Auth用メールドメイン
@@ -43,9 +43,22 @@ const Storage = {
         localStorage.setItem('sb_settings', JSON.stringify(settings));
     },
 
-    // 既読管理（Firebase同期）- 最後に読んだメッセージキーを保存
+    // 既読管理（Firebase専用）- 最後に読んだメッセージキーを保存
+    // キャッシュはリアルタイムリスナーで自動更新される
     _lastReadKeysCache: {},
-    async getLastReadKeys() {
+
+    // キャッシュから既読キーを取得（同期的）
+    getLastReadKeyFromCache(groupCode) {
+        return this._lastReadKeysCache[groupCode] || null;
+    },
+
+    // キャッシュを更新（リアルタイムリスナーから呼ばれる）
+    updateLastReadKeysCache(keys) {
+        this._lastReadKeysCache = keys || {};
+    },
+
+    // Firebaseから既読キーを取得（初回のみ使用）
+    async fetchLastReadKeys() {
         if (!auth.currentUser) return {};
         try {
             const snapshot = await db.ref('userLastReadKeys/' + auth.currentUser.uid).once('value');
@@ -53,11 +66,14 @@ const Storage = {
             return this._lastReadKeysCache;
         } catch (error) {
             console.error('既読データ取得エラー:', error);
-            return this._lastReadKeysCache || {};
+            return {};
         }
     },
+
+    // Firebaseに既読キーを保存
     async setLastReadKey(groupCode, messageKey) {
         if (!auth.currentUser) return;
+        // キャッシュも更新（リアルタイムリスナーがない場合用）
         this._lastReadKeysCache[groupCode] = messageKey;
         try {
             await db.ref('userLastReadKeys/' + auth.currentUser.uid + '/' + groupCode).set(messageKey);
@@ -475,9 +491,8 @@ function initLobbyScreen() {
     });
 }
 
-// 未読管理（Firebaseに同期）
+// 未読管理（Firebase専用 - ローカルキャッシュはStorage内で一元管理）
 let lobbyListeners = {}; // ロビー用のリアルタイムリスナー
-let lastReadKeysCache = {}; // 既読キーのキャッシュ（リアルタイム同期用）
 let lastReadKeysListener = null; // 既読キーのリスナー
 
 async function showLobby() {
@@ -485,25 +500,29 @@ async function showLobby() {
     document.getElementById('current-user').textContent = currentUser.name;
     document.getElementById('room-code-display').classList.add('hidden');
 
-    // Firebaseから既読キーを取得してキャッシュ
-    lastReadKeysCache = await Storage.getLastReadKeys();
-
+    // 既読キーのリアルタイム同期を開始（キャッシュは自動更新される）
+    await startLastReadKeysListener();
     await updateMyGroups();
     startLobbyListeners();
-    startLastReadKeysListener(); // 既読キーのリアルタイム同期開始
     showScreen('lobby-screen');
 }
 
-// 既読キーのリアルタイムリスナー（他端末との同期用）
-function startLastReadKeysListener() {
+// 既読キーのリアルタイムリスナー（Firebaseからリアルタイム同期）
+async function startLastReadKeysListener() {
     stopLastReadKeysListener();
     if (!auth.currentUser) return;
 
+    // まずFirebaseから既読キーを取得してキャッシュを初期化
+    await Storage.fetchLastReadKeys();
+
+    // リアルタイムリスナーを設定
     lastReadKeysListener = db.ref('userLastReadKeys/' + auth.currentUser.uid)
         .on('value', (snapshot) => {
             const newKeys = snapshot.val() || {};
-            const oldKeys = lastReadKeysCache;
-            lastReadKeysCache = newKeys;
+            const oldKeys = { ...Storage._lastReadKeysCache };
+
+            // キャッシュを更新
+            Storage.updateLastReadKeysCache(newKeys);
 
             // 変更があったグループのバッジを更新
             const allGroups = new Set([...Object.keys(oldKeys), ...Object.keys(newKeys)]);
@@ -539,7 +558,8 @@ function startLobbyListeners() {
                     const notes = snapshot.val();
                     if (!notes) return;
 
-                    const lastReadKey = lastReadKeysCache[code];
+                    // Firebaseのキャッシュから既読キーを取得
+                    const lastReadKey = Storage.getLastReadKeyFromCache(code);
 
                     let unreadCount = 0;
                     if (lastReadKey) {
@@ -569,7 +589,7 @@ async function updateUnreadBadgeFromFirebase(code) {
     if (!group || !group.notes) return;
 
     const currentUser = Storage.getCurrentUser();
-    const lastReadKey = lastReadKeysCache[code];
+    const lastReadKey = Storage.getLastReadKeyFromCache(code);
 
     let unreadCount = 0;
     if (lastReadKey) {
@@ -624,7 +644,7 @@ async function updateMyGroups() {
                 const group = groups[code];
                 let unreadCount = 0;
                 if (group.notes && typeof group.notes === 'object') {
-                    const lastReadKey = lastReadKeysCache[code];
+                    const lastReadKey = Storage.getLastReadKeyFromCache(code);
                     if (lastReadKey) {
                         // 自分のメッセージを除外してカウント
                         Object.entries(group.notes).forEach(([key, note]) => {
@@ -1071,7 +1091,7 @@ async function enterGroup(code) {
     if (group.notes && typeof group.notes === 'object') {
         // キーをソートして順序を保証
         const keys = Object.keys(group.notes).sort();
-        const lastReadKey = lastReadKeysCache[code];
+        const lastReadKey = Storage.getLastReadKeyFromCache(code);
         if (lastReadKey) {
             const unreadKeys = keys.filter(k => k > lastReadKey);
             if (unreadKeys.length > 0) {
@@ -1139,11 +1159,12 @@ function startGroupListener(code, preserveCache = false) {
                     renderNotesWithUnreadScroll(allNotesCache);
                 } else {
                     // リスナーから取得した最新メッセージで更新
-                    // 古いメッセージ（loadMoreで取得したもの）は保持
-                    const oldMessages = allNotesCache.filter(note =>
-                        !notesArray.some(n => n._key === note._key)
-                    );
-                    allNotesCache = [...oldMessages, ...notesArray];
+                    // 古いメッセージ（loadMoreで取得したもの）と新しいメッセージをマージ
+                    const merged = [...allNotesCache, ...notesArray];
+                    const uniqueMap = new Map();
+                    merged.forEach(note => uniqueMap.set(note._key, note));
+                    allNotesCache = Array.from(uniqueMap.values())
+                        .sort((a, b) => a._key.localeCompare(b._key));
                     renderNotes(allNotesCache);
                 }
 
@@ -1155,7 +1176,6 @@ function startGroupListener(code, preserveCache = false) {
                 if (notesArray.length > 0) {
                     const lastKey = notesArray[notesArray.length - 1]._key;
                     await Storage.setLastReadKey(code, lastKey);
-                    lastReadKeysCache[code] = lastKey;
                     currentLastReadKey = lastKey;
                 }
                 lastNoteCount = notesArray.length;
@@ -1322,8 +1342,12 @@ async function loadMoreMessages() {
                 // 新しい最古のキーを更新
                 oldestLoadedKey = notesArray[0]._key;
 
-                // 古いメッセージをキャッシュの先頭に追加
-                allNotesCache = [...notesArray, ...allNotesCache];
+                // 古いメッセージをマージ（重複除去してソート）
+                const merged = [...notesArray, ...allNotesCache];
+                const uniqueMap = new Map();
+                merged.forEach(note => uniqueMap.set(note._key, note));
+                allNotesCache = Array.from(uniqueMap.values())
+                    .sort((a, b) => a._key.localeCompare(b._key));
 
                 const container = document.getElementById('messages');
                 const previousScrollHeight = container.scrollHeight;
@@ -1426,7 +1450,12 @@ async function loadMessagesUntilUnread() {
 
                 if (notesArray.length > 0) {
                     oldestLoadedKey = notesArray[0]._key;
-                    allNotesCache = [...notesArray, ...allNotesCache];
+                    // マージ（重複除去してソート）
+                    const merged = [...notesArray, ...allNotesCache];
+                    const uniqueMap = new Map();
+                    merged.forEach(note => uniqueMap.set(note._key, note));
+                    allNotesCache = Array.from(uniqueMap.values())
+                        .sort((a, b) => a._key.localeCompare(b._key));
                 }
 
                 if (notesArray.length < INITIAL_MESSAGES_LIMIT) {

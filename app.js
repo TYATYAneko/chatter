@@ -1276,7 +1276,7 @@ function startGroupListener(code, preserveCache = false) {
                 // キーを保持したまま配列に変換（キーでソートして順序を保証）
                 const notesArray = Object.entries(notes)
                     .map(([key, note]) => ({ ...note, _key: key }))
-                    .sort((a, b) => a._key.localeCompare(b._key));
+                    .sort((a, b) => a._key < b._key ? -1 : a._key > b._key ? 1 : 0);
 
                 // 最古のキーを記録
                 if (notesArray.length > 0) {
@@ -1298,7 +1298,7 @@ function startGroupListener(code, preserveCache = false) {
                     const uniqueMap = new Map();
                     merged.forEach(note => uniqueMap.set(note._key, note));
                     allNotesCache = Array.from(uniqueMap.values())
-                        .sort((a, b) => a._key.localeCompare(b._key));
+                        .sort((a, b) => a._key < b._key ? -1 : a._key > b._key ? 1 : 0);
                     renderNotes(allNotesCache);
                 }
 
@@ -1535,7 +1535,7 @@ async function loadMoreMessages() {
         if (notes) {
             const notesArray = Object.entries(notes)
                 .map(([key, note]) => ({ ...note, _key: key }))
-                .sort((a, b) => a._key.localeCompare(b._key));
+                .sort((a, b) => a._key < b._key ? -1 : a._key > b._key ? 1 : 0);
 
             if (notesArray.length > 0) {
                 // 新しい最古のキーを更新
@@ -1546,7 +1546,7 @@ async function loadMoreMessages() {
                 const uniqueMap = new Map();
                 merged.forEach(note => uniqueMap.set(note._key, note));
                 allNotesCache = Array.from(uniqueMap.values())
-                    .sort((a, b) => a._key.localeCompare(b._key));
+                    .sort((a, b) => a._key < b._key ? -1 : a._key > b._key ? 1 : 0);
 
                 const container = document.getElementById('messages');
                 const previousScrollHeight = container.scrollHeight;
@@ -1645,7 +1645,7 @@ async function loadMessagesUntilUnread() {
             if (notes) {
                 const notesArray = Object.entries(notes)
                     .map(([key, note]) => ({ ...note, _key: key }))
-                    .sort((a, b) => a._key.localeCompare(b._key));
+                    .sort((a, b) => a._key < b._key ? -1 : a._key > b._key ? 1 : 0);
 
                 if (notesArray.length > 0) {
                     oldestLoadedKey = notesArray[0]._key;
@@ -1654,7 +1654,7 @@ async function loadMessagesUntilUnread() {
                     const uniqueMap = new Map();
                     merged.forEach(note => uniqueMap.set(note._key, note));
                     allNotesCache = Array.from(uniqueMap.values())
-                        .sort((a, b) => a._key.localeCompare(b._key));
+                        .sort((a, b) => a._key < b._key ? -1 : a._key > b._key ? 1 : 0);
                 }
 
                 if (notesArray.length < INITIAL_MESSAGES_LIMIT) {
